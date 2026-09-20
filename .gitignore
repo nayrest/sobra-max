@@ -1,0 +1,15 @@
+.env
+
+node_modules/
+
+*.db
+*.db-shm
+*.db-wal
+
+.vscode/
+.idea/
+
+.DS_Store
+Thumbs.db
+# Local backup
+index-before-docker-backup.js

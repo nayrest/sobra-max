@@ -1,0 +1,12 @@
+services:
+  startup-discovery:
+    build: .
+    container_name: startup-discovery
+    restart: unless-stopped
+
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN}
+      NODE_EXTRA_CA_CERTS: /usr/local/share/ca-certificates/russian_trusted_root_ca.crt
+
+    volumes:
+      - ./data:/app/data
