@@ -1,7 +1,7 @@
 require("dotenv").config();
 
 const { Bot, Keyboard } = require("@maxhub/max-bot-api");
-const Database = require("better-sqlite3");
+const db = require("./db");
 
 const TOKEN = process.env.BOT_TOKEN;
 
@@ -15,54 +15,8 @@ const bot = new Bot(TOKEN);
 // ======================================================
 // DATABASE
 // ======================================================
-
-const db = new Database("data/startup_discovery.db");
-db.pragma("journal_mode = WAL");
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS startups (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    founder_id INTEGER NOT NULL,
-    name TEXT,
-    category TEXT,
-    market_type TEXT,
-    stage TEXT,
-    problem TEXT,
-    solution TEXT,
-    traction TEXT,
-    seeking TEXT,
-    investment_amount INTEGER,
-    video TEXT,
-    status TEXT DEFAULT 'draft',
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS search_profiles (
-    user_id INTEGER PRIMARY KEY,
-    goal TEXT,
-    category TEXT,
-    min_stage TEXT,
-    max_investment INTEGER,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS offers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    startup_id INTEGER NOT NULL,
-    sender_id INTEGER NOT NULL,
-    type TEXT,
-    message TEXT,
-    status TEXT DEFAULT 'new',
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-`);
-
-console.log("💾 База startup_discovery.db подключена");
+// Схема и подключение к PostgreSQL теперь находятся в db.js.
+// db.init() создаёт таблицы (если их ещё нет) при старте.
 
 // ======================================================
 // STATE
@@ -505,13 +459,7 @@ function startupCard(startup) {
   );
 }
 
-const stageRanks = {
-  "Идея": 1,
-  "Прототип": 2,
-  "MVP": 3,
-  "Первые продажи": 4,
-  "Масштабирование": 5,
-};
+// stageRanks для matching теперь живёт в db.js (используется там же в findMatches).
 
 // ======================================================
 // /start
@@ -521,10 +469,7 @@ bot.command("start", async (ctx) => {
   const userId = getUserId(ctx);
 
   if (userId) {
-    db.prepare(`
-      INSERT OR IGNORE INTO users (user_id)
-      VALUES (?)
-    `).run(userId);
+    await db.ensureUser(userId);
 
     clearState(userId);
   }
@@ -783,11 +728,9 @@ bot.on("message_created", async (ctx) => {
       state.data
     );
 
-    const startup = db.prepare(`
-      SELECT *
-      FROM startups
-      WHERE id = ?
-    `).get(state.data.startupId);
+    const startup = await db.getStartupById(
+      state.data.startupId
+    );
 
     if (!startup) {
       clearState(userId);
@@ -1054,47 +997,15 @@ async function saveStartupPreview(
   userId,
   data
 ) {
-  const result = db.prepare(`
-    INSERT INTO startups (
-      founder_id,
-      name,
-      category,
-      market_type,
-      stage,
-      problem,
-      solution,
-      traction,
-      seeking,
-      investment_amount,
-      status
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')
-  `).run(
+  const startup = await db.saveStartupDraft(
     userId,
-    data.name,
-    data.category,
-    data.market_type,
-    data.stage,
-    data.problem,
-    data.solution,
-    data.traction,
-    data.seeking,
-    data.investment_amount || null
+    data
   );
-
-  const startupId =
-    Number(result.lastInsertRowid);
-
-  const startup = db.prepare(`
-    SELECT *
-    FROM startups
-    WHERE id = ?
-  `).get(startupId);
 
   setState(
     userId,
     "waiting_publish",
-    { startupId }
+    { startupId: startup.id }
   );
 
   await ctx.reply(
@@ -1130,21 +1041,10 @@ bot.action(
     const startupId =
       state.data.startupId;
 
-    db.prepare(`
-      UPDATE startups
-      SET status = 'published'
-      WHERE id = ?
-      AND founder_id = ?
-    `).run(
+    const startup = await db.publishStartup(
       startupId,
       userId
     );
-
-    const startup = db.prepare(`
-      SELECT *
-      FROM startups
-      WHERE id = ?
-    `).get(startupId);
 
     clearState(userId);
 
@@ -1381,123 +1281,21 @@ for (
 // MATCHING
 // ======================================================
 
-function findMatches(criteria) {
-  // TEST MODE:
-  // собственные проекты пока тоже показываем,
-  // чтобы MVP можно было проверить с одного аккаунта.
-
-  const startups = db.prepare(`
-    SELECT *
-    FROM startups
-    WHERE status = 'published'
-    ORDER BY id DESC
-  `).all();
-
-  const wantedSeeking = {
-    investment: "Инвестиции",
-    pilot: "Пилот / клиент",
-    team: "Команда / co-founder",
-    partner: "Партнёрство",
-  };
-
-  const minimumStage =
-    stageRanks[criteria.min_stage] || 1;
-
-  const results = [];
-
-  for (const startup of startups) {
-    let matched = 0;
-    let total = 3;
-
-    if (
-      startup.seeking ===
-      wantedSeeking[criteria.goal]
-    ) {
-      matched++;
-    }
-
-    if (
-      criteria.category === "Любая" ||
-      startup.category === criteria.category
-    ) {
-      matched++;
-    }
-
-    const startupRank =
-      stageRanks[startup.stage] || 0;
-
-    if (startupRank >= minimumStage) {
-      matched++;
-    }
-
-    if (
-      criteria.goal === "investment"
-    ) {
-      total++;
-
-      if (
-        startup.investment_amount &&
-        criteria.max_investment &&
-        startup.investment_amount <=
-          criteria.max_investment
-      ) {
-        matched++;
-      }
-    }
-
-    if (matched === total) {
-      results.push({
-        startup,
-        matched,
-        total,
-      });
-    }
-  }
-
-  return results;
-}
-
-function saveSearchProfile(
-  userId,
-  criteria
-) {
-  db.prepare(`
-    INSERT INTO search_profiles (
-      user_id,
-      goal,
-      category,
-      min_stage,
-      max_investment
-    )
-    VALUES (?, ?, ?, ?, ?)
-
-    ON CONFLICT(user_id)
-    DO UPDATE SET
-      goal = excluded.goal,
-      category = excluded.category,
-      min_stage = excluded.min_stage,
-      max_investment = excluded.max_investment
-  `).run(
-    userId,
-    criteria.goal,
-    criteria.category,
-    criteria.min_stage,
-    criteria.max_investment || null
-  );
-}
+// findMatches и saveSearchProfile теперь в db.js —
+// логика matching оставлена идентичной (см. db.js).
 
 async function runSearch(
   ctx,
   userId,
   criteria
 ) {
-  saveSearchProfile(
+  await db.saveSearchProfile(
     userId,
     criteria
   );
 
   const matches =
-    findMatches(criteria);
+    await db.findMatches(criteria);
 
   if (matches.length === 0) {
     clearState(userId);
@@ -1664,12 +1462,7 @@ bot.action(
       Number(match[1]);
 
     const startup =
-      db.prepare(`
-        SELECT *
-        FROM startups
-        WHERE id = ?
-        AND status = 'published'
-      `).get(startupId);
+      await db.getPublishedStartupById(startupId);
 
     if (!startup) {
       await ctx.reply(
@@ -1793,12 +1586,7 @@ bot.action(
     }
 
     const startup =
-      db.prepare(`
-        SELECT *
-        FROM startups
-        WHERE id = ?
-        AND status = 'published'
-      `).get(
+      await db.getPublishedStartupById(
         state.data.startupId
       );
 
@@ -1817,27 +1605,15 @@ bot.action(
 
     // SAVE OFFER
 
-    const result =
-      db.prepare(`
-        INSERT INTO offers (
-          startup_id,
-          sender_id,
-          type,
-          message,
-          status
-        )
-        VALUES (?, ?, ?, ?, 'new')
-      `).run(
+    const offer =
+      await db.createOffer(
         startup.id,
         senderId,
         state.data.offerType,
         state.data.message
       );
 
-    const offerId =
-      Number(
-        result.lastInsertRowid
-      );
+    const offerId = offer.id;
 
     // NOTIFY FOUNDER
 
@@ -1919,17 +1695,7 @@ bot.action(
       Number(match[1]);
 
     const offer =
-      db.prepare(`
-        SELECT
-          offers.*,
-          startups.name AS startup_name,
-          startups.founder_id
-        FROM offers
-        JOIN startups
-          ON startups.id =
-             offers.startup_id
-        WHERE offers.id = ?
-      `).get(offerId);
+      await db.getOfferWithStartup(offerId);
 
     if (
       !offer ||
@@ -1944,11 +1710,10 @@ bot.action(
       return;
     }
 
-    db.prepare(`
-      UPDATE offers
-      SET status = 'accepted'
-      WHERE id = ?
-    `).run(offerId);
+    await db.updateOfferStatus(
+      offerId,
+      "accepted"
+    );
 
     await ctx.answerOnCallback({
       notification:
@@ -2006,17 +1771,7 @@ bot.action(
       Number(match[1]);
 
     const offer =
-      db.prepare(`
-        SELECT
-          offers.*,
-          startups.name AS startup_name,
-          startups.founder_id
-        FROM offers
-        JOIN startups
-          ON startups.id =
-             offers.startup_id
-        WHERE offers.id = ?
-      `).get(offerId);
+      await db.getOfferWithStartup(offerId);
 
     if (
       !offer ||
@@ -2031,11 +1786,10 @@ bot.action(
       return;
     }
 
-    db.prepare(`
-      UPDATE offers
-      SET status = 'rejected'
-      WHERE id = ?
-    `).run(offerId);
+    await db.updateOfferStatus(
+      offerId,
+      "rejected"
+    );
 
     await ctx.answerOnCallback({
       notification:
@@ -2132,12 +1886,7 @@ bot.action(
         "waiting_publish" &&
       state.data.startupId
     ) {
-      db.prepare(`
-        DELETE FROM startups
-        WHERE id = ?
-        AND founder_id = ?
-        AND status = 'draft'
-      `).run(
+      await db.deleteDraft(
         state.data.startupId,
         userId
       );
@@ -2172,32 +1921,13 @@ bot.action(
     if (!userId) return;
 
     const startups =
-      db.prepare(`
-        SELECT *
-        FROM startups
-        WHERE founder_id = ?
-        ORDER BY id DESC
-      `).all(userId);
+      await db.getFounderStartups(userId);
 
     const search =
-      db.prepare(`
-        SELECT *
-        FROM search_profiles
-        WHERE user_id = ?
-      `).get(userId);
+      await db.getSearchProfile(userId);
 
     const receivedOffers =
-      db.prepare(`
-        SELECT
-          offers.*,
-          startups.name AS startup_name
-        FROM offers
-        JOIN startups
-          ON startups.id =
-             offers.startup_id
-        WHERE startups.founder_id = ?
-        ORDER BY offers.id DESC
-      `).all(userId);
+      await db.getReceivedOffers(userId);
 
     let message =
       "👤 Мой профиль\n\n";
@@ -2314,17 +2044,22 @@ bot.action(
 // START
 // ======================================================
 
-bot
-  .start()
-  .then(() => {
-    console.log(
-      "🚀 Startup Discovery запущен"
-    );
-  })
-  .catch((error) => {
-    console.error(
-      "❌ Ошибка запуска бота:"
-    );
+async function main() {
+  await db.init();
 
-    console.error(error);
-  });
+  await bot.start();
+
+  console.log(
+    "🚀 Startup Discovery запущен"
+  );
+}
+
+main().catch((error) => {
+  console.error(
+    "❌ Ошибка запуска бота:"
+  );
+
+  console.error(error);
+
+  process.exit(1);
+});
