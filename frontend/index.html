@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>SOBRA</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- MAX Bridge: даёт window.WebApp.initData для авторизации -->
+  <script src="https://st.max.ru/js/max-web-app.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="logo">
+      <img src="logo.jpg" alt="" class="logo-img">
+      <span class="logo-text">SOBRA</span>
+    </div>
+    <div id="user-info" class="user-badge">Вход…</div>
+  </header>
+
+  <nav class="app-nav" id="app-nav">
+    <button class="nav-item active" data-tab="my-startups">Мои проекты</button>
+    <button class="nav-item" data-tab="search">Поиск</button>
+    <button class="nav-item" data-tab="offers">Предложения</button>
+    <button class="nav-item" data-tab="contacts">Контакты</button>
+  </nav>
+
+  <main class="app-content">
+    <!-- Экран ошибки авторизации (показывается вместо вкладок) -->
+    <section id="auth-error" class="auth-error" hidden>
+      <h2>Откройте SOBRA из MAX</h2>
+      <p id="auth-error-text">Мини-приложение работает только внутри чата с ботом в MAX.</p>
+      <button class="btn btn-primary" id="auth-retry">Попробовать снова</button>
+    </section>
+
+    <!-- Мои проекты -->
+    <section id="tab-my-startups" class="tab-content active">
+      <div class="section-head">
+        <h2>Мои проекты</h2>
+      </div>
+      <button class="btn btn-primary btn-block" id="open-create">+ Создать новый стартап</button>
+      <div id="my-startups-list" class="list"></div>
+    </section>
+
+    <!-- Новый стартап -->
+    <section id="tab-create" class="tab-content">
+      <div class="section-head">
+        <h2>Новый стартап</h2>
+      </div>
+      <form id="create-form" class="form" novalidate>
+        <div class="form-grid">
+          <label class="field field-wide">
+            <span>Название</span>
+            <input name="name" maxlength="100" required placeholder="Например, SkillGrow">
+          </label>
+          <label class="field">
+            <span>Категория</span>
+            <select name="category" required>
+              <option value="">Выберите</option>
+              <option>AI</option>
+              <option>SaaS</option>
+              <option>FoodTech</option>
+              <option>FinTech</option>
+              <option>EdTech</option>
+              <option>E-commerce</option>
+              <option>Другое</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Тип рынка</span>
+            <select name="market_type" required>
+              <option value="">Выберите</option>
+              <option>B2B</option>
+              <option>B2C</option>
+              <option>B2B2C</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Стадия</span>
+            <select name="stage" required>
+              <option value="">Выберите</option>
+              <option>Идея</option>
+              <option>Прототип</option>
+              <option>MVP</option>
+              <option>Первые продажи</option>
+              <option>Масштабирование</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Что ищете</span>
+            <select name="seeking" required>
+              <option value="">Выберите</option>
+              <option>Инвестиции</option>
+              <option>Пилот / клиент</option>
+              <option>Команда / co-founder</option>
+              <option>Партнёрство</option>
+            </select>
+          </label>
+          <label class="field field-wide" id="investment-field" hidden>
+            <span>Сумма инвестиций, ₽</span>
+            <input name="investment_amount" inputmode="numeric" placeholder="Например, 5 000 000">
+          </label>
+          <label class="field field-wide">
+            <span>Проблема</span>
+            <textarea name="problem" rows="3" maxlength="1000" required placeholder="Какую проблему решаете и для кого"></textarea>
+          </label>
+          <label class="field field-wide">
+            <span>Решение</span>
+            <textarea name="solution" rows="3" maxlength="1000" required placeholder="Как ваш продукт её решает"></textarea>
+          </label>
+          <label class="field field-wide">
+            <span>Трэкшн / результаты</span>
+            <textarea name="traction" rows="2" maxlength="1000" required placeholder="Пользователи, продажи, пилоты. Если пока нет — так и напишите"></textarea>
+          </label>
+        </div>
+        <p class="form-error" id="create-error" hidden></p>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Сохранить черновик</button>
+          <button type="button" class="btn btn-secondary" id="cancel-create">Отмена</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Поиск -->
+    <section id="tab-search" class="tab-content">
+      <form id="search-form" class="form filters" novalidate>
+        <h2>Фильтры поиска</h2>
+        <div class="form-grid">
+          <label class="field">
+            <span>Цель поиска</span>
+            <select name="goal" required>
+              <option value="">Выберите</option>
+              <option value="investment">Инвестировать</option>
+              <option value="pilot">Пилот / стать клиентом</option>
+              <option value="team">Войти в команду</option>
+              <option value="partner">Партнёрство</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Категория</span>
+            <select name="category">
+              <option>Любая</option>
+              <option>AI</option>
+              <option>SaaS</option>
+              <option>FoodTech</option>
+              <option>FinTech</option>
+              <option>EdTech</option>
+              <option>E-commerce</option>
+              <option>Другое</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Стадия не ниже</span>
+            <select name="min_stage">
+              <option>Идея</option>
+              <option>Прототип</option>
+              <option>MVP</option>
+              <option>Первые продажи</option>
+              <option>Масштабирование</option>
+            </select>
+          </label>
+          <label class="field" id="max-investment-field" hidden>
+            <span>Макс. инвестиции, ₽</span>
+            <input name="max_investment" inputmode="numeric" placeholder="Например, 3 000 000">
+          </label>
+        </div>
+        <p class="form-error" id="search-error" hidden></p>
+        <button type="submit" class="btn btn-primary btn-block">Найти проекты</button>
+      </form>
+      <div id="search-results" class="list"></div>
+    </section>
+
+    <!-- Предложения -->
+    <section id="tab-offers" class="tab-content">
+      <div class="section-head">
+        <h2>Предложения по моим проектам</h2>
+      </div>
+      <div id="offers-list" class="list"></div>
+    </section>
+
+    <!-- Контакты / Match -->
+    <section id="tab-contacts" class="tab-content">
+      <div class="section-head">
+        <h2>Мои кандидаты</h2>
+        <p class="hint">Вы приняли их предложения</p>
+      </div>
+      <div id="contacts-list" class="list"></div>
+
+      <div class="section-head">
+        <h2>Проекты, которые приняли меня</h2>
+        <p class="hint">Основатели приняли ваши отклики</p>
+      </div>
+      <div id="matches-list" class="list"></div>
+    </section>
+  </main>
+
+  <!-- Панель отклика на проект -->
+  <div class="sheet-backdrop" id="offer-sheet" hidden>
+    <form class="sheet" id="offer-form" novalidate>
+      <h2>Отклик на проект</h2>
+      <p class="sheet-project" id="offer-project"></p>
+      <label class="field">
+        <span>Что предлагаете</span>
+        <select name="type" required>
+          <option value="investment">Инвестиции</option>
+          <option value="pilot">Пилот / сотрудничество</option>
+          <option value="team">Присоединиться к команде</option>
+          <option value="partner">Партнёрство</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Сообщение основателю</span>
+        <textarea name="message" rows="4" maxlength="1000" required placeholder="Коротко о себе и почему вам интересен проект"></textarea>
+      </label>
+      <p class="form-error" id="offer-error" hidden></p>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Отправить отклик</button>
+        <button type="button" class="btn btn-secondary" id="offer-cancel">Отмена</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

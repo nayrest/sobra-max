@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS offers (
   id           SERIAL PRIMARY KEY,
   startup_id   INTEGER NOT NULL REFERENCES startups (id),
   sender_id    BIGINT NOT NULL,
+  sender_name  TEXT,
   type         TEXT,
   message      TEXT,
   status       TEXT NOT NULL DEFAULT 'new',
@@ -52,3 +53,7 @@ CREATE INDEX IF NOT EXISTS idx_offers_startup ON offers (startup_id);
 --   user_id / founder_id / sender_id -> BIGINT (id пользователей MAX могут быть большими числами)
 --   TEXT DEFAULT CURRENT_TIMESTAMP    -> TIMESTAMPTZ DEFAULT NOW()
 --   investment_amount INTEGER         -> BIGINT (суммы в рублях могут превышать INT4)
+
+-- Миграция для уже существующих баз (созданных до появления sender_name):
+-- CREATE TABLE IF NOT EXISTS не меняет существующую таблицу, поэтому колонку добавляем явно.
+ALTER TABLE offers ADD COLUMN IF NOT EXISTS sender_name TEXT;

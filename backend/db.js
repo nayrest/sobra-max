@@ -15,12 +15,10 @@ const fs = require("fs");
 const path = require("path");
 const { Pool } = require("pg");
 
-if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL is not set");
-}
-
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+  // Пример DATABASE_URL:
+  // postgres://user:password@postgres:5432/startup_discovery
 });
 
 // ======================================================
@@ -231,12 +229,12 @@ async function getSearchProfile(userId) {
 // OFFERS
 // ======================================================
 
-async function createOffer(startupId, senderId, type, message) {
+async function createOffer(startupId, senderId, senderName, type, message) {
   const { rows } = await pool.query(
-    `INSERT INTO offers (startup_id, sender_id, type, message, status)
-     VALUES ($1, $2, $3, $4, 'new')
+    `INSERT INTO offers (startup_id, sender_id, sender_name, type, message, status)
+     VALUES ($1, $2, $3, $4, $5, 'new')
      RETURNING *`,
-    [startupId, senderId, type, message]
+    [startupId, senderId, senderName || null, type, message]
   );
 
   return rows[0];
@@ -274,6 +272,53 @@ async function getReceivedOffers(founderId) {
   return rows;
 }
 
+// "Список кандидатов" у предпринимателя — принятые предложения
+// по его стартапам (после MATCH можно продолжать общение в MAX).
+async function getContactsForFounder(founderId) {
+  const { rows } = await pool.query(
+    `SELECT
+       offers.id AS offer_id,
+       offers.sender_id AS candidate_id,
+       offers.sender_name AS candidate_name,
+       offers.type,
+       offers.message,
+       offers.created_at,
+       startups.id AS startup_id,
+       startups.name AS startup_name
+     FROM offers
+     JOIN startups ON startups.id = offers.startup_id
+     WHERE startups.founder_id = $1
+       AND offers.status = 'accepted'
+     ORDER BY offers.id DESC`,
+    [founderId]
+  );
+
+  return rows;
+}
+
+// "Список стартапов от предпринимателей" у кандидата — стартапы,
+// на которые я откликался и founder принял моё предложение.
+async function getContactsForCandidate(senderId) {
+  const { rows } = await pool.query(
+    `SELECT
+       offers.id AS offer_id,
+       offers.type,
+       offers.message,
+       offers.created_at,
+       startups.id AS startup_id,
+       startups.name AS startup_name,
+       startups.founder_id
+     FROM offers
+     JOIN startups ON startups.id = offers.startup_id
+     WHERE offers.sender_id = $1
+       AND offers.status = 'accepted'
+     ORDER BY offers.id DESC`,
+    [senderId]
+  );
+
+  return rows;
+}
+
 module.exports = {
   pool,
   init,
@@ -291,4 +336,6 @@ module.exports = {
   getOfferWithStartup,
   updateOfferStatus,
   getReceivedOffers,
+  getContactsForFounder,
+  getContactsForCandidate,
 };

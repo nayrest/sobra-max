@@ -1,6 +1,6 @@
 services:
   startup-discovery:
-    build: .
+    build: ./backend
     container_name: startup-discovery
     restart: unless-stopped
 
@@ -8,9 +8,14 @@ services:
       BOT_TOKEN: ${BOT_TOKEN}
       NODE_EXTRA_CA_CERTS: /usr/local/share/ca-certificates/russian_trusted_root_ca.crt
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      API_PORT: 3000
+      API_DEBUG_AUTH: ${API_DEBUG_AUTH:-false}
+      YANDEX_API_KEY: ${YANDEX_API_KEY:-}
+      YANDEX_FOLDER_ID: ${YANDEX_FOLDER_ID:-}
 
-    volumes:
-      - ./data:/app/data
+    # API доступен только с самого сервера, наружу его отдаёт Nginx по HTTPS
+    ports:
+      - "127.0.0.1:3000:3000"
 
     depends_on:
       postgres:
