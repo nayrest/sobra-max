@@ -198,20 +198,24 @@ async function findMatches(criteria) {
 // ======================================================
 
 async function saveSearchProfile(userId, criteria) {
+  // about приходит только из мини-приложения. Бот его не передаёт,
+  // поэтому при поиске из бота сохраняем прежнее значение (COALESCE).
   await pool.query(
-    `INSERT INTO search_profiles (user_id, goal, category, min_stage, max_investment)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO search_profiles (user_id, goal, category, min_stage, max_investment, about)
+     VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT (user_id) DO UPDATE SET
        goal = EXCLUDED.goal,
        category = EXCLUDED.category,
        min_stage = EXCLUDED.min_stage,
-       max_investment = EXCLUDED.max_investment`,
+       max_investment = EXCLUDED.max_investment,
+       about = COALESCE(EXCLUDED.about, search_profiles.about)`,
     [
       userId,
       criteria.goal,
       criteria.category,
       criteria.min_stage,
       criteria.max_investment || null,
+      criteria.about || null,
     ]
   );
 }

@@ -2101,6 +2101,12 @@ async function main() {
 
   const app = createApi({ notify });
 
+  console.log(
+    require("./ai-matching").isEnabled()
+      ? "🤖 AI Matching: YandexGPT подключён"
+      : "⚠️  AI Matching выключен: не заданы YANDEX_API_KEY / YANDEX_FOLDER_ID"
+  );
+
   app.listen(API_PORT, () => {
     console.log(`🌐 API для мини-приложения слушает порт ${API_PORT}`);
   });

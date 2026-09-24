@@ -105,8 +105,8 @@ function toast(message, kind = "ok") {
   toastTimer = setTimeout(() => (el.hidden = true), 3000);
 }
 
-function showLoading(container) {
-  container.innerHTML = `<div class="state"><span class="spinner" aria-hidden="true"></span>Загружаем…</div>`;
+function showLoading(container, text = "Загружаем…") {
+  container.innerHTML = `<div class="state"><span class="spinner" aria-hidden="true"></span>${escapeHtml(text)}</div>`;
 }
 
 function showEmpty(container, text) {
@@ -341,6 +341,7 @@ async function loadSearchProfile() {
     if (profile.max_investment) {
       form.max_investment.value = Number(profile.max_investment).toLocaleString("ru-RU");
     }
+    if (profile.about) form.about.value = profile.about;
     $("max-investment-field").hidden = form.goal.value !== "investment";
   } catch {
     // Сохранённых фильтров нет или сервер недоступен — просто начинаем с пустой формы
@@ -369,23 +370,24 @@ function setupSearchForm() {
       category: form.category.value,
       min_stage: form.min_stage.value,
       max_investment: form.goal.value === "investment" ? parseMoney(form.max_investment.value) : null,
+      about: form.about.value.trim() || null,
     };
 
     state.lastSearchGoal = body.goal;
 
     const container = $("search-results");
     const button = form.querySelector("button[type=submit]");
-    showLoading(container);
+    showLoading(container, body.about ? "Подбираем проекты и сравниваем их с вашим опытом. Это займёт несколько секунд…" : undefined);
 
     try {
-      const { matches } = await withBusy(button, "Ищем…", () => api("POST", "/api/search", body));
+      const { matches, ai } = await withBusy(button, "Ищем…", () => api("POST", "/api/search", body));
 
       if (matches.length === 0) {
         showEmpty(container, "Под эти фильтры проектов пока нет. Попробуйте категорию «Любая» или стадию пониже.");
         return;
       }
 
-      container.innerHTML = matches.map(renderMatch).join("");
+      container.innerHTML = renderAiNotice(ai) + matches.map(renderMatch).join("");
     } catch (error) {
       showListError(container, error, () => form.requestSubmit());
     }
@@ -397,7 +399,49 @@ function setupSearchForm() {
   });
 }
 
-function renderMatch({ startup: s, matched, total }) {
+// ======================================================
+// AI MATCHING
+// ======================================================
+
+const AI_VERDICTS = {
+  strong: { text: "Сильное соответствие", cls: "ai-strong" },
+  partial: { text: "Частичное соответствие", cls: "ai-partial" },
+  weak: { text: "Слабое соответствие", cls: "ai-weak" },
+};
+
+function renderAiNotice(ai) {
+  if (!ai) return "";
+  if (ai.status === "no_profile") {
+    return `<p class="ai-notice">Заполните поле «О себе», и ИИ объяснит, насколько вы подходите каждому проекту.</p>`;
+  }
+  if (ai.message) return `<p class="ai-notice">${escapeHtml(ai.message)}</p>`;
+  return "";
+}
+
+function renderAiList(icon, title, items) {
+  if (!items || items.length === 0) return "";
+  return `
+    <div class="ai-group">
+      <p class="ai-group-title">${icon} ${title}</p>
+      <ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+    </div>`;
+}
+
+function renderAi(ai) {
+  if (!ai) return "";
+  const verdict = AI_VERDICTS[ai.verdict] || AI_VERDICTS.partial;
+
+  return `
+    <section class="ai-block ${verdict.cls}">
+      <p class="ai-head"><strong>${verdict.text}</strong> <span>${ai.score} из 100</span></p>
+      ${renderAiList("✅", "Почему подходите", ai.reasons)}
+      ${renderAiList("⚠️", "Чего не хватает", ai.missing)}
+      ${renderAiList("❓", "Что уточнить перед знакомством", ai.clarify)}
+      <p class="ai-note">Оценка ИИ по тексту карточки и вашему описанию. Проверьте детали при знакомстве.</p>
+    </section>`;
+}
+
+function renderMatch({ startup: s, matched, total, ai }) {
   const isOwn = state.user && Number(s.founder_id) === state.user.user_id;
 
   return `
@@ -415,6 +459,7 @@ function renderMatch({ startup: s, matched, total }) {
       <p class="card-text"><strong>Проблема.</strong> ${escapeHtml(s.problem)}</p>
       <p class="card-text"><strong>Решение.</strong> ${escapeHtml(s.solution)}</p>
       <p class="card-text"><strong>Трэкшн.</strong> ${escapeHtml(s.traction)}</p>
+      ${renderAi(ai)}
       ${
         isOwn
           ? `<p class="hint">Это ваш проект</p>`

@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS search_profiles (
   category        TEXT,
   min_stage       TEXT,
   max_investment  BIGINT,
+  about           TEXT,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -57,3 +58,4 @@ CREATE INDEX IF NOT EXISTS idx_offers_startup ON offers (startup_id);
 -- Миграция для уже существующих баз (созданных до появления sender_name):
 -- CREATE TABLE IF NOT EXISTS не меняет существующую таблицу, поэтому колонку добавляем явно.
 ALTER TABLE offers ADD COLUMN IF NOT EXISTS sender_name TEXT;
+ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS about TEXT;

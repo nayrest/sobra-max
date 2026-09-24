@@ -10,6 +10,7 @@
 const crypto = require("crypto");
 const express = require("express");
 const db = require("./db");
+const aiMatching = require("./ai-matching");
 
 // ======================================================
 // СПРАВОЧНИКИ (совпадают со значениями, которые пишет бот)
@@ -300,9 +301,19 @@ function createApi({ notify = {} } = {}) {
       max_investment: goal === "investment" ? optionalMoney(body.max_investment, "max_investment") : null,
     };
 
-    await db.saveSearchProfile(req.user.userId, criteria);
-    const matches = await db.findMatches(criteria);
-    res.json({ matches });
+    // «О себе» — необязательное поле для AI Matching
+    let about = null;
+    if (typeof body.about === "string" && body.about.trim()) {
+      if (body.about.length > 1500) throw new ApiError(400, 'Поле "about" длиннее 1500 символов');
+      about = body.about.trim();
+    }
+
+    await db.saveSearchProfile(req.user.userId, { ...criteria, about });
+    const found = await db.findMatches(criteria);
+
+    // ИИ оценивает только то, что прошло фильтры. При сбое ИИ поиск всё равно отвечает.
+    const { matches, ai } = await aiMatching.enrichMatches(about, criteria, found);
+    res.json({ matches, ai });
   }));
 
   app.get("/api/search/profile", wrap(async (req, res) => {
