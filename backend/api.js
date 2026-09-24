@@ -199,7 +199,13 @@ function createApi({ notify = {} } = {}) {
     try {
       await fn(...args);
     } catch (error) {
-      console.error("❌ Ошибка уведомления через бота:", error.message);
+      if (/dialog not found/i.test(error.message)) {
+        // MAX разрешает писать только тем, кто сам запускал бота.
+        // Так бывает с демо-основателями и отладочными пользователями.
+        console.warn("ℹ️  Уведомление не отправлено: получатель ещё не запускал бота в MAX");
+      } else {
+        console.error("❌ Ошибка уведомления через бота:", error.message);
+      }
     }
   };
 

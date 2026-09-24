@@ -16,6 +16,8 @@ const crypto = require("crypto");
 const COMPLETION_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion";
 const REQUEST_TIMEOUT_MS = 20000;
 const MAX_EVALUATED = 8; // сколько проектов максимум отдаём ИИ за один поиск
+const CONCURRENCY = 3; // одновременных запросов к YandexGPT, чтобы не ловить обрывы и лимиты
+const RETRY_DELAY_MS = 700;
 const CACHE_TTL_MS = 60 * 60 * 1000; // повторный поиск с тем же текстом не тратит грант
 
 const GOAL_LABELS = {
@@ -118,8 +120,45 @@ function buildUserMessage(about, criteria, startup) {
   return `Профиль человека:\n${JSON.stringify(profile, null, 2)}\n\nКарточка стартапа:\n${JSON.stringify(project, null, 2)}`;
 }
 
+// Сетевой обрыв, перегрузка (429) и ошибки сервера (5xx) — стоит повторить.
+// Неверный ключ (401) или нет прав (403) — повтор не поможет.
+class RetryableError extends Error {}
+
+async function callWithRetry(userText) {
+  try {
+    return await callYandexGpt(userText);
+  } catch (error) {
+    if (!(error instanceof RetryableError)) throw error;
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+    return callYandexGpt(userText);
+  }
+}
+
 async function callYandexGpt(userText) {
-  const response = await fetch(COMPLETION_URL, {
+  let response;
+  try {
+    response = await sendRequest(userText);
+  } catch (error) {
+    // fetch падает без ответа сервера: обрыв соединения, DNS, таймаут
+    const reason = error.cause?.code || error.name || error.message;
+    throw new RetryableError(`нет ответа от YandexGPT (${reason})`);
+  }
+
+  if (!response.ok) {
+    const details = await response.text().catch(() => "");
+    const message = `YandexGPT ответил ${response.status}: ${details.slice(0, 300)}`;
+    if (response.status === 429 || response.status >= 500) throw new RetryableError(message);
+    throw new Error(message);
+  }
+
+  const data = await response.json();
+  const text = data?.result?.alternatives?.[0]?.message?.text;
+  if (!text) throw new Error("YandexGPT вернул пустой ответ");
+  return text;
+}
+
+function sendRequest(userText) {
+  return fetch(COMPLETION_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -137,16 +176,6 @@ async function callYandexGpt(userText) {
     }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
-
-  if (!response.ok) {
-    const details = await response.text().catch(() => "");
-    throw new Error(`YandexGPT ответил ${response.status}: ${details.slice(0, 300)}`);
-  }
-
-  const data = await response.json();
-  const text = data?.result?.alternatives?.[0]?.message?.text;
-  if (!text) throw new Error("YandexGPT вернул пустой ответ");
-  return text;
 }
 
 // ======================================================
@@ -221,10 +250,30 @@ async function evaluate(about, criteria, startup) {
   const cached = cacheGet(key);
   if (cached) return cached;
 
-  const text = await callYandexGpt(buildUserMessage(about, criteria, startup));
+  const text = await callWithRetry(buildUserMessage(about, criteria, startup));
   const evaluation = applyContentGuard(parseEvaluation(text), about, startup);
   cacheSet(key, evaluation);
   return evaluation;
+}
+
+// Как Promise.allSettled, но одновременно выполняется не больше limit задач
+async function mapWithLimit(items, limit, task) {
+  const results = new Array(items.length);
+  let next = 0;
+
+  async function worker() {
+    while (next < items.length) {
+      const index = next++;
+      try {
+        results[index] = { status: "fulfilled", value: await task(items[index]) };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 // ======================================================
@@ -249,8 +298,8 @@ async function enrichMatches(about, criteria, matches) {
   const toEvaluate = matches.slice(0, MAX_EVALUATED);
   const rest = matches.slice(MAX_EVALUATED);
 
-  const results = await Promise.allSettled(
-    toEvaluate.map((match) => evaluate(text, criteria, match.startup))
+  const results = await mapWithLimit(toEvaluate, CONCURRENCY, (match) =>
+    evaluate(text, criteria, match.startup)
   );
 
   let failed = 0;
