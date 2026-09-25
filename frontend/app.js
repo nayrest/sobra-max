@@ -547,28 +547,27 @@ async function fetchProfile() {
   return state.profile;
 }
 
-/** Извлечь 10 цифр номера РФ (без кода страны) */
+/**
+ * 10 цифр номера без кода страны.
+ * Код 7/8 в начале всегда отбрасываем (в т.ч. из маски «+7 …»).
+ */
 function extractRuPhoneDigits(raw) {
   if (!raw) return "";
   let digits = String(raw).replace(/\D/g, "");
-  if (digits.length >= 11 && (digits[0] === "7" || digits[0] === "8")) {
-    digits = digits.slice(1);
-  }
-  // если вставили с лишними цифрами — берём первые 10
+  if (digits[0] === "7" || digits[0] === "8") digits = digits.slice(1);
   return digits.slice(0, 10);
 }
 
-/** Нормализация российского номера → +7XXXXXXXXXX или null */
+/** Нормализация → +7XXXXXXXXXX или null */
 function normalizeRuPhone(raw) {
   const digits = extractRuPhoneDigits(raw);
   if (digits.length !== 10) return null;
   return `+7${digits}`;
 }
 
-/** Отображение: +7 (900) 123-45-67 */
-function formatRuPhone(raw) {
-  const d = extractRuPhoneDigits(raw);
-  if (!d.length) return "";
+/** Только из цифр: +7 (900) 123-45-67 */
+function formatRuPhoneDigits(d) {
+  if (!d) return "";
   let out = "+7";
   if (d.length > 0) out += " (" + d.slice(0, Math.min(3, d.length));
   if (d.length >= 3) out += ")";
@@ -576,6 +575,33 @@ function formatRuPhone(raw) {
   if (d.length > 6) out += "-" + d.slice(6, Math.min(8, d.length));
   if (d.length > 8) out += "-" + d.slice(8, 10);
   return out;
+}
+
+function formatRuPhone(raw) {
+  return formatRuPhoneDigits(extractRuPhoneDigits(raw));
+}
+
+/** Позиция курсора сразу после n-й значащей цифры (не считая код страны в маске) */
+function cursorAfterDigits(formatted, n) {
+  if (n <= 0) {
+    // после «+7 (»
+    const i = formatted.indexOf("(");
+    return i >= 0 ? i + 1 : formatted.length;
+  }
+  let seen = 0;
+  for (let i = 0; i < formatted.length; i++) {
+    if (/\d/.test(formatted[i])) {
+      // пропускаем ведущую «7» кода страны в строке «+7 …»
+      if (seen === 0 && formatted[i] === "7" && i < 3) continue;
+      seen++;
+      if (seen >= n) {
+        let pos = i + 1;
+        while (pos < formatted.length && /[)\s-]/.test(formatted[pos])) pos++;
+        return pos;
+      }
+    }
+  }
+  return formatted.length;
 }
 
 function setupPhoneMask(input) {
@@ -586,51 +612,77 @@ function setupPhoneMask(input) {
   input.setAttribute("autocomplete", "tel");
   input.setAttribute("maxlength", "18");
 
-  const apply = () => {
-    const formatted = formatRuPhone(input.value);
-    // сохраняем позицию курсора относительно количества цифр слева
-    const sel = input.selectionStart ?? input.value.length;
-    const digitsBefore = extractRuPhoneDigits(input.value.slice(0, sel)).length;
+  const setValue = (digits, cursorDigits) => {
+    const formatted = formatRuPhoneDigits(digits);
     input.value = formatted;
-    // ставим курсор после той же «цифры»
-    let pos = 0;
-    let seen = 0;
-    while (pos < formatted.length && seen < digitsBefore) {
-      if (/\d/.test(formatted[pos])) seen++;
-      pos++;
-    }
-    // если после цифры идёт служебный символ закрытия — перескакиваем
-    while (pos < formatted.length && !/\d/.test(formatted[pos]) && formatted[pos] !== "+") {
-      // не уходим вперёд слишком агрессивно при наборе середины
-      if (formatted[pos] === " " || formatted[pos] === "-" || formatted[pos] === ")") pos++;
-      else break;
-    }
-    try {
-      input.setSelectionRange(pos, pos);
-    } catch {
-      /* ignore */
-    }
-  };
-
-  input.addEventListener("input", apply);
-  input.addEventListener("paste", () => setTimeout(apply, 0));
-  input.addEventListener("focus", () => {
-    if (!extractRuPhoneDigits(input.value).length) {
-      input.value = "+7 (";
+    const pos = cursorAfterDigits(formatted, cursorDigits);
+    requestAnimationFrame(() => {
       try {
-        input.setSelectionRange(input.value.length, input.value.length);
+        input.setSelectionRange(pos, pos);
       } catch {
         /* ignore */
       }
+    });
+  };
+
+  input.addEventListener("keydown", (e) => {
+    if (e.key !== "Backspace" && e.key !== "Delete") return;
+    if (input.selectionStart !== input.selectionEnd) return; // выделение — пусть браузер
+
+    const start = input.selectionStart ?? 0;
+    const val = input.value;
+    const digits = extractRuPhoneDigits(val);
+
+    if (e.key === "Backspace" && start > 0) {
+      // если слева разделитель или «+7 (» — удаляем предыдущую цифру
+      const leftChar = val[start - 1];
+      if (/\D/.test(leftChar) || start <= 4) {
+        e.preventDefault();
+        if (!digits.length) {
+          input.value = "";
+          return;
+        }
+        const digitsBefore = extractRuPhoneDigits(val.slice(0, start)).length;
+        const removeAt = Math.max(0, (digitsBefore || 1) - 1);
+        const next = digits.slice(0, removeAt) + digits.slice(removeAt + 1);
+        setValue(next, removeAt);
+      }
+    }
+
+    if (e.key === "Delete" && start < val.length) {
+      const rightChar = val[start];
+      if (/\D/.test(rightChar)) {
+        e.preventDefault();
+        const digitsBefore = extractRuPhoneDigits(val.slice(0, start)).length;
+        if (digitsBefore >= digits.length) return;
+        const next = digits.slice(0, digitsBefore) + digits.slice(digitsBefore + 1);
+        setValue(next, digitsBefore);
+      }
     }
   });
-  input.addEventListener("blur", () => {
-    const d = extractRuPhoneDigits(input.value);
-    if (!d.length) {
+
+  input.addEventListener("input", () => {
+    const sel = input.selectionStart ?? input.value.length;
+    // сколько значащих цифр было слева от курсора до переформатирования
+    let digitsBefore = extractRuPhoneDigits(input.value.slice(0, sel)).length;
+    const digits = extractRuPhoneDigits(input.value);
+    // если стёрли всё до кода страны — очищаем поле
+    if (!digits.length && !/\d/.test(input.value.replace(/^\+?7/, ""))) {
       input.value = "";
       return;
     }
-    input.value = formatRuPhone(d);
+    setValue(digits, digitsBefore);
+  });
+
+  input.addEventListener("focus", () => {
+    if (!input.value.trim()) return;
+    const d = extractRuPhoneDigits(input.value);
+    if (d.length) setValue(d, d.length);
+  });
+
+  input.addEventListener("blur", () => {
+    const d = extractRuPhoneDigits(input.value);
+    input.value = d.length ? formatRuPhoneDigits(d) : "";
   });
 }
 
