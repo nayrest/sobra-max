@@ -83,6 +83,9 @@ ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS visible BOOLEAN NOT NULL DE
 
 -- Контактные данные кандидата (заполняются в мини-приложении)
 ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS full_name TEXT;
+ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS last_name TEXT;
+ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS first_name TEXT;
+ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS patronymic TEXT;
 ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS email TEXT;
 ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS phone TEXT;
 

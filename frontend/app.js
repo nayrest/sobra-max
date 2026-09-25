@@ -547,6 +547,45 @@ async function fetchProfile() {
   return state.profile;
 }
 
+/** Нормализация российского номера → +7XXXXXXXXXX или null */
+function normalizeRuPhone(raw) {
+  if (!raw) return null;
+  let digits = String(raw).replace(/\D/g, "");
+  if (digits.length === 11 && (digits[0] === "7" || digits[0] === "8")) {
+    digits = digits.slice(1);
+  }
+  if (digits.length !== 10) return null;
+  return `+7${digits}`;
+}
+
+function displayNameFromProfile(p, fallback) {
+  if (p?.last_name || p?.first_name) {
+    return [p.last_name, p.first_name].filter(Boolean).join(" ").trim();
+  }
+  if (p?.full_name) return String(p.full_name).trim();
+  return fallback || "";
+}
+
+function updateUserbox(p) {
+  const name = displayNameFromProfile(p, state.user?.name || `ID ${state.user?.user_id || ""}`);
+  $("user-name").textContent = name || "Вход…";
+  const initials = [p?.first_name, p?.last_name]
+    .filter(Boolean)
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  $("user-avatar").textContent =
+    initials ||
+    name
+      .split(/\s+/)
+      .map((w) => w[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() ||
+    "·";
+}
+
 async function loadProfile() {
   const form = $("profile-form");
   formError("profile-error", null);
@@ -566,13 +605,16 @@ async function loadProfile() {
 
   try {
     const p = await fetchProfile();
-    form.elements.full_name.value = p.full_name || state.user?.name || "";
+    form.elements.last_name.value = p.last_name || "";
+    form.elements.first_name.value = p.first_name || "";
+    form.elements.patronymic.value = p.patronymic || "";
     form.elements.email.value = p.email || "";
     form.elements.phone.value = p.phone || "";
     form.elements.goal.value = p.goal || "";
     form.elements.category.value = p.category || "Любая";
     form.elements.about.value = p.about || "";
     form.elements.visible.checked = p.visible;
+    updateUserbox(p);
   } catch (error) {
     formError("profile-error", error);
   }
@@ -585,9 +627,14 @@ function setupProfileForm() {
     formError("profile-error", null);
     const f = form.elements;
 
-    if (!f.full_name.value.trim()) {
-      f.full_name.focus();
-      formError("profile-error", new Error("Укажите ФИО."));
+    if (!f.last_name.value.trim()) {
+      f.last_name.focus();
+      formError("profile-error", new Error("Укажите фамилию."));
+      return;
+    }
+    if (!f.first_name.value.trim()) {
+      f.first_name.focus();
+      formError("profile-error", new Error("Укажите имя."));
       return;
     }
     if (!f.email.value.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email.value.trim())) {
@@ -595,9 +642,10 @@ function setupProfileForm() {
       formError("profile-error", new Error("Укажите корректный e-mail."));
       return;
     }
-    if (!f.phone.value.trim()) {
+    const phone = normalizeRuPhone(f.phone.value);
+    if (!phone) {
       f.phone.focus();
-      formError("profile-error", new Error("Укажите номер телефона."));
+      formError("profile-error", new Error("Укажите российский номер: +7 900 123-45-67"));
       return;
     }
     if (!f.goal.value) {
@@ -615,15 +663,18 @@ function setupProfileForm() {
     try {
       state.profile = await busy(button, "Сохраняем…", () =>
         api("PUT", "/api/profile", {
-          full_name: f.full_name.value.trim(),
+          last_name: f.last_name.value.trim(),
+          first_name: f.first_name.value.trim(),
+          patronymic: f.patronymic.value.trim(),
           email: f.email.value.trim(),
-          phone: f.phone.value.trim(),
+          phone,
           goal: f.goal.value,
           category: f.category.value,
           about: f.about.value.trim(),
           visible: f.visible.checked,
         })
       );
+      updateUserbox(state.profile);
       const wasOnboarding = state.onboarding;
       state.onboarding = false;
       toast(
@@ -895,8 +946,10 @@ function needsOnboarding(profile) {
     !profile.goal ||
     !profile.about ||
     !String(profile.about).trim() ||
-    !profile.full_name ||
-    !String(profile.full_name).trim() ||
+    !profile.last_name ||
+    !String(profile.last_name).trim() ||
+    !profile.first_name ||
+    !String(profile.first_name).trim() ||
     !profile.email ||
     !String(profile.email).trim() ||
     !profile.phone ||
@@ -917,13 +970,13 @@ async function authorize() {
       ? await api("POST", "/api/auth", { init_data: initData })
       : { user_id: Number(debugUserId), name: "Отладка" };
 
-    const name = state.user.name || `ID ${state.user.user_id}`;
-    $("user-name").textContent = name;
-    $("user-avatar").textContent = name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+    // Сначала имя из MAX; после загрузки профиля — Фамилия + Имя из профиля
+    updateUserbox(null);
 
     // Первичный вход: если профиль кандидата не заполнен — сразу открываем создание профиля
     try {
       const profile = await fetchProfile();
+      updateUserbox(profile);
       if (needsOnboarding(profile)) {
         state.onboarding = true;
         show("profile");

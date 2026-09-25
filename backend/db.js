@@ -206,9 +206,20 @@ async function findMatches(criteria) {
 async function saveSearchProfile(userId, criteria) {
   // about, visible и контакты приходят только из мини-приложения. Бот их не передаёт,
   // поэтому при их отсутствии сохраняем прежние значения (COALESCE).
+  const fullName =
+    [criteria.last_name, criteria.first_name, criteria.patronymic]
+      .filter(Boolean)
+      .join(" ")
+      .trim() ||
+    criteria.full_name ||
+    null;
+
   await pool.query(
-    `INSERT INTO search_profiles (user_id, goal, category, min_stage, max_investment, about, visible, full_name, email, phone)
-     VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, FALSE), $8, $9, $10)
+    `INSERT INTO search_profiles (
+       user_id, goal, category, min_stage, max_investment, about, visible,
+       full_name, last_name, first_name, patronymic, email, phone
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, FALSE), $8, $9, $10, $11, $12, $13)
      ON CONFLICT (user_id) DO UPDATE SET
        goal = EXCLUDED.goal,
        category = EXCLUDED.category,
@@ -217,8 +228,11 @@ async function saveSearchProfile(userId, criteria) {
        about = COALESCE($6, search_profiles.about),
        visible = COALESCE($7, search_profiles.visible),
        full_name = COALESCE($8, search_profiles.full_name),
-       email = COALESCE($9, search_profiles.email),
-       phone = COALESCE($10, search_profiles.phone)`,
+       last_name = COALESCE($9, search_profiles.last_name),
+       first_name = COALESCE($10, search_profiles.first_name),
+       patronymic = COALESCE($11, search_profiles.patronymic),
+       email = COALESCE($12, search_profiles.email),
+       phone = COALESCE($13, search_profiles.phone)`,
     [
       userId,
       criteria.goal,
@@ -227,7 +241,10 @@ async function saveSearchProfile(userId, criteria) {
       criteria.max_investment || null,
       criteria.about || null,
       typeof criteria.visible === "boolean" ? criteria.visible : null,
-      criteria.full_name || null,
+      fullName,
+      criteria.last_name || null,
+      criteria.first_name || null,
+      criteria.patronymic || null,
       criteria.email || null,
       criteria.phone || null,
     ]

@@ -359,10 +359,26 @@ function createApi({ notify = {} } = {}) {
 
   // ---------- профиль кандидата ----------
 
+  // Российский номер: +7 / 8 / без кода, 10 цифр после кода страны.
+  // Сохраняем в формате +7XXXXXXXXXX.
+  function normalizeRuPhone(raw) {
+    if (typeof raw !== "string") return null;
+    let digits = raw.replace(/\D/g, "");
+    if (digits.length === 11 && (digits[0] === "7" || digits[0] === "8")) {
+      digits = digits.slice(1);
+    }
+    if (digits.length !== 10) return null;
+    // Мобильные обычно на 9; городские — другие коды. Разрешаем любые 10 цифр РФ.
+    return `+7${digits}`;
+  }
+
   app.get("/api/profile", wrap(async (req, res) => {
     const profile = await db.getSearchProfile(req.user.userId);
     res.json({
       name: req.user.name,
+      last_name: profile?.last_name || "",
+      first_name: profile?.first_name || "",
+      patronymic: profile?.patronymic || "",
       full_name: profile?.full_name || req.user.name || "",
       email: profile?.email || "",
       phone: profile?.phone || "",
@@ -377,15 +393,25 @@ function createApi({ notify = {} } = {}) {
     const body = req.body || {};
     const current = await db.getSearchProfile(req.user.userId);
 
-    const fullName = requireText(body, "full_name", 150);
+    const lastName = requireText(body, "last_name", 80);
+    const firstName = requireText(body, "first_name", 80);
+    const patronymic =
+      typeof body.patronymic === "string" ? body.patronymic.trim().slice(0, 80) : "";
+
     const email = requireText(body, "email", 200);
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       throw new ApiError(400, "Укажите корректный e-mail");
     }
-    const phone = requireText(body, "phone", 30);
+
+    const phone = normalizeRuPhone(body.phone);
+    if (!phone) {
+      throw new ApiError(400, "Укажите российский номер телефона: +7 XXX XXX-XX-XX");
+    }
+
     const goal = requireOneOf(body.goal, Object.keys(SEEKING), "goal");
     const about = requireText(body, "about", 1500);
     const visible = body.visible === true;
+    const fullName = [lastName, firstName, patronymic].filter(Boolean).join(" ");
 
     await db.saveSearchProfile(req.user.userId, {
       goal,
@@ -394,6 +420,9 @@ function createApi({ notify = {} } = {}) {
       max_investment: current?.max_investment || null,
       about,
       visible,
+      last_name: lastName,
+      first_name: firstName,
+      patronymic: patronymic || null,
       full_name: fullName,
       email,
       phone,
@@ -401,6 +430,9 @@ function createApi({ notify = {} } = {}) {
 
     res.json({
       name: req.user.name,
+      last_name: lastName,
+      first_name: firstName,
+      patronymic,
       full_name: fullName,
       email,
       phone,
