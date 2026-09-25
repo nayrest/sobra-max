@@ -11,6 +11,7 @@ const crypto = require("crypto");
 const express = require("express");
 const db = require("./db");
 const aiMatching = require("./ai-matching");
+const ideaCheck = require("./idea-check");
 
 // ======================================================
 // СПРАВОЧНИКИ (совпадают со значениями, которые пишет бот)
@@ -75,6 +76,14 @@ function requireOneOf(value, allowed, field) {
     throw new ApiError(400, `Поле "${field}" должно быть одним из: ${allowed.join(", ")}`);
   }
   return value;
+}
+
+function optionalText(body, field, maxLength = 1000) {
+  const value = body[field];
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") throw new ApiError(400, `Поле "${field}" должно быть строкой`);
+  if (value.length > maxLength) throw new ApiError(400, `Поле "${field}" длиннее ${maxLength} символов`);
+  return value.trim() || null;
 }
 
 function optionalMoney(value, field) {
@@ -172,7 +181,7 @@ function authMiddleware(botToken) {
     }
 
     req.user = user;
-    await db.ensureUser(user.userId);
+    await db.ensureUser(user.userId, user.name);
     next();
   });
 }
@@ -222,7 +231,7 @@ function createApi({ notify = {} } = {}) {
     const user = validateInitData(req.body?.init_data, botToken);
     if (!user) throw new ApiError(401, "initData отсутствует, устарел или подпись неверна");
 
-    await db.ensureUser(user.userId);
+    await db.ensureUser(user.userId, user.name);
     res.json({ user_id: user.userId, name: user.name });
   }));
 
@@ -230,6 +239,16 @@ function createApi({ notify = {} } = {}) {
   app.use("/api", authMiddleware(botToken));
 
   // ---------- startups (founder) ----------
+
+  // Idea Check: обязательные блоки описывают суть, остальные можно заполнить позже —
+  // незаполненные честно попадут в карту проекта как «не проработано».
+  const REQUIRED_IDEA = ["customer", "problem", "solution", "partner_needed"];
+  const OPTIONAL_IDEA = ["competitors", "traction", "business_model", "economics"];
+
+  async function withIdeaMap(startup) {
+    const { map, readiness } = await ideaCheck.buildIdeaMap(startup);
+    return db.saveIdeaMap(startup.id, map, readiness);
+  }
 
   app.post("/api/startups", wrap(async (req, res) => {
     const body = req.body || {};
@@ -240,16 +259,33 @@ function createApi({ notify = {} } = {}) {
       category: requireOneOf(body.category, CATEGORIES, "category"),
       market_type: requireOneOf(body.market_type, MARKET_TYPES, "market_type"),
       stage: requireOneOf(body.stage, STAGES, "stage"),
-      problem: requireText(body, "problem"),
-      solution: requireText(body, "solution"),
-      traction: requireText(body, "traction"),
       seeking,
       investment_amount:
         seeking === SEEKING.investment ? optionalMoney(body.investment_amount, "investment_amount") : null,
     };
+    for (const field of REQUIRED_IDEA) data[field] = requireText(body, field);
+    for (const field of OPTIONAL_IDEA) data[field] = optionalText(body, field);
 
     const startup = await db.saveStartupDraft(req.user.userId, data);
-    res.status(201).json(startup);
+    res.status(201).json(await withIdeaMap(startup));
+  }));
+
+  // Обновить отдельные блоки Idea Check без повторного прохождения всей формы
+  app.patch("/api/startups/:id", wrap(async (req, res) => {
+    const startup = await getOwnStartup(req);
+    const body = req.body || {};
+    const fields = {};
+
+    for (const field of REQUIRED_IDEA) {
+      if (field in body) fields[field] = requireText(body, field);
+    }
+    for (const field of OPTIONAL_IDEA) {
+      if (field in body) fields[field] = optionalText(body, field);
+    }
+    if (Object.keys(fields).length === 0) throw new ApiError(400, "Нет полей для обновления");
+
+    const updated = await db.updateIdeaFields(startup.id, req.user.userId, fields);
+    res.json(await withIdeaMap(updated));
   }));
 
   // /my и /public/:id объявлены раньше /:id, чтобы не перехватывались им
@@ -307,11 +343,11 @@ function createApi({ notify = {} } = {}) {
       max_investment: goal === "investment" ? optionalMoney(body.max_investment, "max_investment") : null,
     };
 
-    // «О себе» — необязательное поле для AI Matching
-    let about = null;
-    if (typeof body.about === "string" && body.about.trim()) {
-      if (body.about.length > 1500) throw new ApiError(400, 'Поле "about" длиннее 1500 символов');
-      about = body.about.trim();
+    // «О себе» для AI Matching: из запроса, а если не передано — из профиля кандидата
+    let about = optionalText(body, "about", 1500);
+    if (!about) {
+      const profile = await db.getSearchProfile(req.user.userId);
+      about = profile?.about || null;
     }
 
     await db.saveSearchProfile(req.user.userId, { ...criteria, about });
@@ -324,6 +360,88 @@ function createApi({ notify = {} } = {}) {
 
   app.get("/api/search/profile", wrap(async (req, res) => {
     res.json(await db.getSearchProfile(req.user.userId));
+  }));
+
+  // ---------- профиль кандидата ----------
+
+  app.get("/api/profile", wrap(async (req, res) => {
+    const profile = await db.getSearchProfile(req.user.userId);
+    res.json({
+      name: req.user.name,
+      goal: profile?.goal || null,
+      category: profile?.category || "Любая",
+      about: profile?.about || "",
+      visible: Boolean(profile?.visible),
+    });
+  }));
+
+  app.put("/api/profile", wrap(async (req, res) => {
+    const body = req.body || {};
+    const current = await db.getSearchProfile(req.user.userId);
+
+    const goal = requireOneOf(body.goal, Object.keys(SEEKING), "goal");
+    const about = requireText(body, "about", 1500);
+    const visible = body.visible === true;
+
+    await db.saveSearchProfile(req.user.userId, {
+      goal,
+      category: requireOneOf(body.category || "Любая", [...CATEGORIES, "Любая"], "category"),
+      min_stage: current?.min_stage || "Идея",
+      max_investment: current?.max_investment || null,
+      about,
+      visible,
+    });
+
+    res.json({ name: req.user.name, goal, category: body.category || "Любая", about, visible });
+  }));
+
+  // ---------- подбор людей для основателя и приглашения ----------
+
+  async function getOwnPublishedStartup(req) {
+    const startup = await getOwnStartup(req);
+    if (startup.status !== "published") {
+      throw new ApiError(409, "Сначала опубликуйте проект: кандидаты откликаются только на опубликованные проекты");
+    }
+    return startup;
+  }
+
+  app.get("/api/startups/:id/candidates", wrap(async (req, res) => {
+    const startup = await getOwnPublishedStartup(req);
+    const found = await db.getCandidatesForStartup(startup);
+    const { candidates, ai } = await aiMatching.rankCandidates(startup, found);
+    const invited = new Set(await db.getInvitedUserIds(startup.id));
+
+    res.json({
+      ai,
+      candidates: candidates.map((c) => ({
+        user_id: Number(c.user_id),
+        name: c.name || "Пользователь MAX",
+        goal: c.goal,
+        about: c.about,
+        ai: c.ai || null,
+        invited: invited.has(Number(c.user_id)),
+      })),
+    });
+  }));
+
+  app.post("/api/startups/:id/invite", wrap(async (req, res) => {
+    const startup = await getOwnPublishedStartup(req);
+    const userId = parseId(req.body?.user_id);
+
+    if (!(await db.isVisibleCandidate(userId))) {
+      throw new ApiError(404, "Кандидат не найден или скрыл свой профиль");
+    }
+
+    const invite = await db.createInvite(startup.id, userId);
+    if (!invite) throw new ApiError(409, "Этот кандидат уже приглашён");
+
+    await safeNotify(notify.invite, startup, userId);
+    res.status(201).json(invite);
+  }));
+
+  app.get("/api/invites", wrap(async (req, res) => {
+    const invites = await db.getInvitesForUser(req.user.userId);
+    res.json({ invites });
   }));
 
   // ---------- offers ----------

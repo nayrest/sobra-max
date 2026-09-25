@@ -36,11 +36,12 @@ async function init() {
 // USERS
 // ======================================================
 
-async function ensureUser(userId) {
+async function ensureUser(userId, name = null) {
+  // Имя обновляем, если пришло новое: человек мог сменить его в MAX
   await pool.query(
-    `INSERT INTO users (user_id) VALUES ($1)
-     ON CONFLICT (user_id) DO NOTHING`,
-    [userId]
+    `INSERT INTO users (user_id, name) VALUES ($1, $2)
+     ON CONFLICT (user_id) DO UPDATE SET name = COALESCE(EXCLUDED.name, users.name)`,
+    [userId, name]
   );
 }
 
@@ -48,30 +49,52 @@ async function ensureUser(userId) {
 // STARTUPS
 // ======================================================
 
-// Заменяет прямой INSERT в saveStartupPreview() + последующий SELECT
+// Поля Idea Check, которые можно редактировать по отдельности
+const IDEA_FIELDS = [
+  "customer", "problem", "solution", "competitors",
+  "traction", "business_model", "economics", "partner_needed",
+];
+
 async function saveStartupDraft(founderId, data) {
   const { rows } = await pool.query(
     `INSERT INTO startups (
-       founder_id, name, category, market_type, stage,
-       problem, solution, traction, seeking, investment_amount, status
+       founder_id, name, category, market_type, stage, seeking, investment_amount,
+       customer, problem, solution, competitors, traction, business_model, economics, partner_needed,
+       status
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'draft')
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'draft')
      RETURNING *`,
     [
-      founderId,
-      data.name,
-      data.category,
-      data.market_type,
-      data.stage,
-      data.problem,
-      data.solution,
-      data.traction,
-      data.seeking,
+      founderId, data.name, data.category, data.market_type, data.stage, data.seeking,
       data.investment_amount || null,
+      data.customer || null, data.problem || null, data.solution || null, data.competitors || null,
+      data.traction || null, data.business_model || null, data.economics || null, data.partner_needed || null,
     ]
   );
 
   return rows[0];
+}
+
+// Обновляет один или несколько блоков Idea Check у своего проекта
+async function updateIdeaFields(startupId, founderId, fields) {
+  const keys = Object.keys(fields).filter((key) => IDEA_FIELDS.includes(key));
+  if (keys.length === 0) return getStartupById(startupId);
+
+  const sets = keys.map((key, index) => `${key} = $${index + 3}`).join(", ");
+  await pool.query(
+    `UPDATE startups SET ${sets} WHERE id = $1 AND founder_id = $2`,
+    [startupId, founderId, ...keys.map((key) => fields[key] || null)]
+  );
+
+  return getStartupById(startupId);
+}
+
+async function saveIdeaMap(startupId, ideaMap, readiness) {
+  const { rows } = await pool.query(
+    `UPDATE startups SET idea_map = $2, readiness = $3 WHERE id = $1 RETURNING *`,
+    [startupId, JSON.stringify(ideaMap), readiness]
+  );
+  return rows[0] || null;
 }
 
 async function getStartupById(startupId) {
@@ -198,17 +221,18 @@ async function findMatches(criteria) {
 // ======================================================
 
 async function saveSearchProfile(userId, criteria) {
-  // about приходит только из мини-приложения. Бот его не передаёт,
-  // поэтому при поиске из бота сохраняем прежнее значение (COALESCE).
+  // about и visible приходят только из мини-приложения. Бот их не передаёт,
+  // поэтому при их отсутствии сохраняем прежние значения (COALESCE).
   await pool.query(
-    `INSERT INTO search_profiles (user_id, goal, category, min_stage, max_investment, about)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO search_profiles (user_id, goal, category, min_stage, max_investment, about, visible)
+     VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, FALSE))
      ON CONFLICT (user_id) DO UPDATE SET
        goal = EXCLUDED.goal,
        category = EXCLUDED.category,
        min_stage = EXCLUDED.min_stage,
        max_investment = EXCLUDED.max_investment,
-       about = COALESCE(EXCLUDED.about, search_profiles.about)`,
+       about = COALESCE($6, search_profiles.about),
+       visible = COALESCE($7, search_profiles.visible)`,
     [
       userId,
       criteria.goal,
@@ -216,6 +240,7 @@ async function saveSearchProfile(userId, criteria) {
       criteria.min_stage,
       criteria.max_investment || null,
       criteria.about || null,
+      typeof criteria.visible === "boolean" ? criteria.visible : null,
     ]
   );
 }
@@ -323,6 +348,83 @@ async function getContactsForCandidate(senderId) {
   return rows;
 }
 
+// ======================================================
+// КАНДИДАТЫ ДЛЯ ОСНОВАТЕЛЯ
+// ======================================================
+// Кандидат — пользователь, который заполнил «О себе» и разрешил
+// основателям находить его профиль (visible = TRUE).
+
+const SEEKING_TO_GOAL = {
+  "Инвестиции": "investment",
+  "Пилот / клиент": "pilot",
+  "Команда / co-founder": "team",
+  "Партнёрство": "partner",
+};
+
+async function getCandidatesForStartup(startup, limit = 20) {
+  const goal = SEEKING_TO_GOAL[startup.seeking];
+
+  const { rows } = await pool.query(
+    `SELECT sp.user_id, sp.goal, sp.category, sp.about, sp.max_investment, u.name
+     FROM search_profiles sp
+     LEFT JOIN users u ON u.user_id = sp.user_id
+     WHERE sp.visible = TRUE
+       AND sp.about IS NOT NULL AND sp.about <> ''
+       AND sp.user_id <> $1
+       AND ($2::text IS NULL OR sp.goal = $2)
+       AND (sp.category IS NULL OR sp.category = 'Любая' OR sp.category = $3)
+     ORDER BY sp.created_at DESC
+     LIMIT $4`,
+    [startup.founder_id, goal || null, startup.category, limit]
+  );
+
+  return rows;
+}
+
+async function isVisibleCandidate(userId) {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM search_profiles WHERE user_id = $1 AND visible = TRUE AND about IS NOT NULL`,
+    [userId]
+  );
+  return rows.length > 0;
+}
+
+// ======================================================
+// ПРИГЛАШЕНИЯ
+// ======================================================
+
+// Возвращает созданное приглашение или null, если оно уже было
+async function createInvite(startupId, userId) {
+  const { rows } = await pool.query(
+    `INSERT INTO invites (startup_id, user_id) VALUES ($1, $2)
+     ON CONFLICT (startup_id, user_id) DO NOTHING
+     RETURNING *`,
+    [startupId, userId]
+  );
+  return rows[0] || null;
+}
+
+async function getInvitedUserIds(startupId) {
+  const { rows } = await pool.query(
+    `SELECT user_id FROM invites WHERE startup_id = $1`,
+    [startupId]
+  );
+  return rows.map((row) => Number(row.user_id));
+}
+
+// Приглашения, которые получил пользователь, по опубликованным проектам
+async function getInvitesForUser(userId) {
+  const { rows } = await pool.query(
+    `SELECT i.id AS invite_id, i.created_at AS invited_at, s.*
+     FROM invites i
+     JOIN startups s ON s.id = i.startup_id
+     WHERE i.user_id = $1 AND s.status = 'published'
+     ORDER BY i.id DESC`,
+    [userId]
+  );
+  return rows;
+}
+
 module.exports = {
   pool,
   init,
@@ -342,4 +444,12 @@ module.exports = {
   getReceivedOffers,
   getContactsForFounder,
   getContactsForCandidate,
+  updateIdeaFields,
+  saveIdeaMap,
+  getCandidatesForStartup,
+  isVisibleCandidate,
+  createInvite,
+  getInvitedUserIds,
+  getInvitesForUser,
+  IDEA_FIELDS,
 };

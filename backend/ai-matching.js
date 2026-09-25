@@ -112,7 +112,12 @@ function buildUserMessage(about, criteria, startup) {
     проблема: startup.problem,
     решение: startup.solution,
     трэкшн: startup.traction,
+    клиент: startup.customer,
+    кого_ищет_в_команду: startup.partner_needed,
   };
+  for (const key of Object.keys(project)) {
+    if (project[key] === null || project[key] === undefined || project[key] === "") delete project[key];
+  }
   if (startup.investment_amount) {
     project.запрашиваемые_инвестиции_рублей = Number(startup.investment_amount);
   }
@@ -124,20 +129,20 @@ function buildUserMessage(about, criteria, startup) {
 // Неверный ключ (401) или нет прав (403) — повтор не поможет.
 class RetryableError extends Error {}
 
-async function callWithRetry(userText) {
+async function callWithRetry(userText, systemPrompt = SYSTEM_PROMPT) {
   try {
-    return await callYandexGpt(userText);
+    return await callYandexGpt(userText, systemPrompt);
   } catch (error) {
     if (!(error instanceof RetryableError)) throw error;
     await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
-    return callYandexGpt(userText);
+    return callYandexGpt(userText, systemPrompt);
   }
 }
 
-async function callYandexGpt(userText) {
+async function callYandexGpt(userText, systemPrompt) {
   let response;
   try {
-    response = await sendRequest(userText);
+    response = await sendRequest(userText, systemPrompt);
   } catch (error) {
     // fetch падает без ответа сервера: обрыв соединения, DNS, таймаут
     const reason = error.cause?.code || error.name || error.message;
@@ -157,7 +162,7 @@ async function callYandexGpt(userText) {
   return text;
 }
 
-function sendRequest(userText) {
+function sendRequest(userText, systemPrompt) {
   return fetch(COMPLETION_URL, {
     method: "POST",
     headers: {
@@ -170,7 +175,7 @@ function sendRequest(userText) {
       completionOptions: { stream: false, temperature: 0.1, maxTokens: "600" },
       jsonObject: true,
       messages: [
-        { role: "system", text: SYSTEM_PROMPT },
+        { role: "system", text: systemPrompt },
         { role: "user", text: userText },
       ],
     }),
@@ -229,7 +234,7 @@ function isMeaningful(text, minWords) {
 }
 
 function applyContentGuard(evaluation, about, startup) {
-  const projectText = [startup.problem, startup.solution, startup.traction].join(" ");
+  const projectText = [startup.customer, startup.problem, startup.solution, startup.traction].join(" ");
   const notes = [];
 
   if (!isMeaningful(projectText, 6)) notes.push("Проект описан слишком коротко: уточните проблему и решение у основателя");
@@ -323,4 +328,48 @@ async function enrichMatches(about, criteria, matches) {
   return { matches: [...evaluated, ...rest], ai };
 }
 
-module.exports = { enrichMatches, isEnabled, parseEvaluation, applyContentGuard };
+// ======================================================
+// ПОДБОР ЛЮДЕЙ ДЛЯ ОСНОВАТЕЛЯ
+// ======================================================
+// Та же оценка «профиль человека против карточки проекта»,
+// только в обратную сторону: один проект, много кандидатов.
+
+async function rankCandidates(startup, candidates) {
+  if (candidates.length === 0) return { candidates, ai: { status: "ok" } };
+  if (!isEnabled()) return { candidates, ai: { status: "disabled" } };
+
+  const toEvaluate = candidates.slice(0, MAX_EVALUATED);
+  const rest = candidates.slice(MAX_EVALUATED);
+
+  const results = await mapWithLimit(toEvaluate, CONCURRENCY, (candidate) =>
+    evaluate(candidate.about, { goal: candidate.goal, max_investment: candidate.max_investment }, startup)
+  );
+
+  let failed = 0;
+  const evaluated = toEvaluate.map((candidate, index) => {
+    const result = results[index];
+    if (result.status === "fulfilled") return { ...candidate, ai: result.value };
+    failed++;
+    console.error(`❌ AI Matching, кандидат ${candidate.user_id}:`, result.reason?.message || result.reason);
+    return { ...candidate, ai: null };
+  });
+
+  evaluated.sort((a, b) => (b.ai?.score ?? -1) - (a.ai?.score ?? -1));
+
+  const status = failed === 0 ? "ok" : failed === toEvaluate.length ? "error" : "partial";
+  const ai = { status };
+  if (status === "error") ai.message = "ИИ-оценка сейчас недоступна, кандидаты показаны без сортировки.";
+  if (status === "partial") ai.message = "Часть кандидатов ИИ оценить не смог, они показаны в конце списка.";
+
+  return { candidates: [...evaluated, ...rest], ai };
+}
+
+module.exports = {
+  enrichMatches,
+  rankCandidates,
+  isEnabled,
+  isMeaningful,
+  callWithRetry,
+  parseEvaluation,
+  applyContentGuard,
+};

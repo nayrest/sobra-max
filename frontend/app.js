@@ -1,28 +1,18 @@
-// SOBRA — мини-приложение MAX.
-// Повторяет все сценарии чат-бота через REST API (/api/*), описанный в API-CONTRACT.md.
+// SOBRA AI — мини-приложение MAX.
+// Две роли в одном приложении:
+//   основатель: проверка идеи → карта проекта → ИИ-подбор партнёра → приглашение;
+//   кандидат:   профиль → поиск проектов с оценкой ИИ → отклик.
+// Отклик, принятый основателем, — это MATCH: оба видят друг друга в «Контактах».
 
 // ======================================================
-// ИНИЦИАЛИЗАЦИЯ MAX И АВТОРИЗАЦИЯ
+// АВТОРИЗАЦИЯ И API
 // ======================================================
 
 const WebApp = window.WebApp || null;
-
-// Подписанная строка запуска от MAX. Бэкенд проверяет её подпись.
 const initData = WebApp && WebApp.initData ? WebApp.initData : "";
 
-// Отладка в обычном браузере: ?debug_user=123
-// Работает, только если на сервере включён API_DEBUG_AUTH=true.
+// Отладка в обычном браузере: ?debug_user=123 (работает, только если на сервере API_DEBUG_AUTH=true)
 const debugUserId = new URLSearchParams(location.search).get("debug_user");
-
-const state = {
-  user: null,
-  lastSearchGoal: null,
-  offerStartupId: null,
-};
-
-// ======================================================
-// API
-// ======================================================
 
 class ApiError extends Error {
   constructor(status, message) {
@@ -33,17 +23,12 @@ class ApiError extends Error {
 
 async function api(method, path, body) {
   const headers = { "Content-Type": "application/json" };
-
   if (initData) headers.Authorization = `Bearer ${initData}`;
   else if (debugUserId) headers["X-Debug-User-Id"] = debugUserId;
 
   let response;
   try {
-    response = await fetch(path, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    response = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined });
   } catch {
     throw new ApiError(0, "Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.");
   }
@@ -54,15 +39,71 @@ async function api(method, path, body) {
   try {
     data = await response.json();
   } catch {
-    // тело не JSON — обработаем ниже по статусу
+    // тело не JSON — обработаем по статусу
   }
 
   if (!response.ok) {
     throw new ApiError(response.status, (data && data.error) || `Ошибка сервера (${response.status})`);
   }
-
   return data;
 }
+
+// ======================================================
+// СПРАВОЧНИКИ
+// ======================================================
+
+const BLOCKS = [
+  { id: "audience", field: "customer", title: "Целевая аудитория", q: "Кто ваш клиент?", hint: "Кто будет пользоваться продуктом? Возраст, занятость, ситуация, в которой возникает потребность.", required: true },
+  { id: "problem", field: "problem", title: "Проблема клиента", q: "Какую проблему решаете?", hint: "Что мешает клиенту сейчас и почему это для него важно.", required: true },
+  { id: "solution", field: "solution", title: "Решение", q: "Как вы её решаете?", hint: "Что именно вы предлагаете и чем это лучше текущего способа.", required: true },
+  { id: "competitors", field: "competitors", title: "Конкуренты", q: "Кто конкуренты?", hint: "Кто уже решает эту проблему и чем вы отличаетесь." },
+  { id: "demand", field: "traction", title: "Проверка спроса", q: "Как проверяли спрос?", hint: "Интервью, опросы, заявки, продажи, пилоты. С цифрами, если есть." },
+  { id: "model", field: "business_model", title: "Бизнес-модель", q: "Как будете зарабатывать?", hint: "Кто платит, за что и сколько." },
+  { id: "economics", field: "economics", title: "Экономика", q: "Считали ли экономику?", hint: "Средний чек, себестоимость, маржа, срок окупаемости — если уже считали." },
+];
+
+const PARTNER_QUESTION = {
+  field: "partner_needed",
+  q: "Какого партнёра ищете?",
+  hint: "Какие компетенции, опыт и зоны ответственности вам нужны. Например: операционный партнёр — персонал, поставщики, смены.",
+};
+
+const STATUS = {
+  confirmed: { text: "Подтверждено", tone: "green" },
+  hypothesis: { text: "Гипотеза", tone: "amber" },
+  missing: { text: "Не проработано", tone: "red" },
+};
+
+const GOALS = {
+  team: "Войти в команду",
+  partner: "Партнёрство",
+  investment: "Инвестировать",
+  pilot: "Пилот / стать клиентом",
+};
+
+const CATEGORY_ICON = {
+  FoodTech: "☕", AI: "🤖", SaaS: "☁️", FinTech: "💳", EdTech: "🎓", "E-commerce": "🛒", Другое: "💡",
+};
+
+const OFFER_STATUS = {
+  new: { text: "Новый", tone: "blue" },
+  accepted: { text: "Принят", tone: "green" },
+  rejected: { text: "Отклонён", tone: "gray" },
+};
+
+const AI_VERDICTS = {
+  strong: { text: "Сильное соответствие", cls: "ai-strong" },
+  partial: { text: "Частичное соответствие", cls: "ai-partial" },
+  weak: { text: "Слабое соответствие", cls: "ai-weak" },
+};
+
+const state = {
+  user: null,
+  profile: null,
+  currentProjectId: null,
+  offerStartupId: null,
+  lastSearchGoal: null,
+};
 
 // ======================================================
 // ОБЩИЕ ПОМОЩНИКИ
@@ -70,19 +111,17 @@ async function api(method, path, body) {
 
 const $ = (id) => document.getElementById(id);
 
-function escapeHtml(value) {
+function esc(value) {
   if (value === null || value === undefined) return "";
   return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
-function formatMoney(value) {
-  if (!value) return "";
-  return Number(value).toLocaleString("ru-RU") + " ₽";
+const badge = (text, tone = "blue") => `<span class="badge ${tone}">${esc(text)}</span>`;
+
+function money(value) {
+  return value ? Number(value).toLocaleString("ru-RU") + " ₽" : "";
 }
 
 function parseMoney(text) {
@@ -90,54 +129,44 @@ function parseMoney(text) {
   return digits ? Number(digits) : null;
 }
 
-function formatDate(value) {
-  if (!value) return "";
-  return new Date(value).toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+function dateText(value) {
+  return value ? new Date(value).toLocaleDateString("ru-RU", { day: "numeric", month: "long" }) : "";
 }
 
 let toastTimer = null;
 function toast(message, kind = "ok") {
   const el = $("toast");
   el.textContent = message;
-  el.className = `toast toast-${kind}`;
+  el.className = `toast ${kind}`;
   el.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (el.hidden = true), 3000);
+  toastTimer = setTimeout(() => (el.hidden = true), 3500);
 }
 
-function showLoading(container, text = "Загружаем…") {
-  container.innerHTML = `<div class="state"><span class="spinner" aria-hidden="true"></span>${escapeHtml(text)}</div>`;
+function loading(container, text = "Загружаем…") {
+  container.innerHTML = `<div class="state"><span class="spinner" aria-hidden="true"></span>${esc(text)}</div>`;
 }
 
-function showEmpty(container, text) {
-  container.innerHTML = `<div class="state">${escapeHtml(text)}</div>`;
+function empty(container, text) {
+  container.innerHTML = `<div class="state">${esc(text)}</div>`;
 }
 
-function showListError(container, error, retry) {
-  container.innerHTML = `
-    <div class="state state-error">
-      <p>${escapeHtml(error.message)}</p>
-      <button class="btn btn-secondary btn-small" type="button">Повторить</button>
-    </div>`;
+function failed(container, error, retry) {
+  container.innerHTML = `<div class="state error"><p>${esc(error.message)}</p>
+    <button class="btn secondary small" type="button">Повторить</button></div>`;
   container.querySelector("button").addEventListener("click", retry);
 }
 
-function showFormError(id, error) {
+function formError(id, error) {
   const el = $(id);
-  if (!error) {
-    el.hidden = true;
-    el.textContent = "";
-    return;
-  }
-  el.textContent = error.message || String(error);
-  el.hidden = false;
+  el.hidden = !error;
+  el.textContent = error ? error.message || String(error) : "";
 }
 
-// Блокирует кнопку на время запроса, чтобы не было двойных отправок
-async function withBusy(button, busyText, action) {
+async function busy(button, text, action) {
   const original = button.textContent;
   button.disabled = true;
-  button.textContent = busyText;
+  button.textContent = text;
   try {
     return await action();
   } finally {
@@ -146,343 +175,539 @@ async function withBusy(button, busyText, action) {
   }
 }
 
+function seekingText(s) {
+  let text = s.seeking || "Не указано";
+  if (s.seeking === "Инвестиции" && s.investment_amount) text += `, ${money(s.investment_amount)}`;
+  return text;
+}
+
 // ======================================================
 // НАВИГАЦИЯ
 // ======================================================
 
-const tabLoaders = {
-  "my-startups": loadMyStartups,
-  search: loadSearchProfile,
-  offers: loadOffers,
-  contacts: loadContacts,
+// view → вкладка нижнего меню, к которой он относится
+const VIEW_TAB = {
+  projects: "projects", idea: "projects", project: "projects", match: "projects",
+  search: "search", responses: "responses", contacts: "contacts", profile: "profile",
 };
 
-function openTab(name) {
-  document.querySelectorAll(".tab-content").forEach((t) => t.classList.remove("active"));
-  $(`tab-${name}`).classList.add("active");
+const VIEW_LOAD = {
+  projects: loadProjects,
+  project: () => loadProject(state.currentProjectId),
+  match: () => loadCandidates(state.currentProjectId),
+  search: prepareSearch,
+  responses: loadResponses,
+  contacts: loadContacts,
+  profile: loadProfile,
+};
 
-  document.querySelectorAll(".nav-item").forEach((n) => {
-    n.classList.toggle("active", n.dataset.tab === name || (name === "create" && n.dataset.tab === "my-startups"));
+function show(view) {
+  document.querySelectorAll(".view").forEach((v) => (v.hidden = true));
+  $(`view-${view}`).hidden = false;
+
+  document.querySelectorAll("#tabbar button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.tab === VIEW_TAB[view]);
   });
 
   window.scrollTo(0, 0);
-  if (tabLoaders[name]) tabLoaders[name]();
+  if (VIEW_LOAD[view]) VIEW_LOAD[view]();
 }
 
 function setupNavigation() {
-  document.querySelectorAll(".nav-item").forEach((item) => {
-    item.addEventListener("click", () => openTab(item.dataset.tab));
-  });
+  document.querySelectorAll("#tabbar button").forEach((b) => b.addEventListener("click", () => show(b.dataset.tab)));
+  document.querySelectorAll("[data-back]").forEach((b) => b.addEventListener("click", () => show(b.dataset.back)));
+  $("match-back").addEventListener("click", () => show("project"));
 }
 
 // ======================================================
-// МОИ ПРОЕКТЫ
+// ИИ: общий блок объяснения
 // ======================================================
 
-const STATUS_LABELS = {
-  draft: { text: "Черновик", cls: "badge-draft" },
-  published: { text: "Опубликован", cls: "badge-published" },
-};
-
-function seekingText(startup) {
-  let text = startup.seeking || "Не указано";
-  if (startup.seeking === "Инвестиции" && startup.investment_amount) {
-    text += `, ${formatMoney(startup.investment_amount)}`;
-  }
-  return text;
+function aiList(icon, title, items) {
+  if (!items || items.length === 0) return "";
+  return `<div class="ai-group"><p class="ai-title">${icon} ${title}</p>
+    <ul>${items.map((i) => `<li>${esc(i)}</li>`).join("")}</ul></div>`;
 }
 
-async function loadMyStartups() {
-  const container = $("my-startups-list");
-  showLoading(container);
+function renderAi(ai, whyTitle = "Почему подходит") {
+  if (!ai) return "";
+  const v = AI_VERDICTS[ai.verdict] || AI_VERDICTS.partial;
+  return `<section class="ai-block ${v.cls}">
+    <div class="ai-head"><b>${v.text}</b><span class="score">${ai.score}%</span></div>
+    ${aiList("✅", whyTitle, ai.reasons)}
+    ${aiList("⚠️", "Чего не хватает", ai.missing)}
+    ${aiList("❓", "Что уточнить перед знакомством", ai.clarify)}
+    <p class="ai-note">Оценка ИИ по текстам профиля и проекта. Проверьте детали при знакомстве.</p>
+  </section>`;
+}
 
+function aiNotice(ai, noProfileText) {
+  if (!ai) return "";
+  if (ai.status === "no_profile") return `<p class="notice">${esc(noProfileText)}</p>`;
+  if (ai.status === "disabled") return `<p class="notice">ИИ-оценка сейчас выключена, показаны результаты по фильтрам.</p>`;
+  if (ai.message) return `<p class="notice">${esc(ai.message)}</p>`;
+  return "";
+}
+
+// ======================================================
+// ОСНОВАТЕЛЬ: МОИ ПРОЕКТЫ
+// ======================================================
+
+function readinessBar(value) {
+  const v = Number(value) || 0;
+  return `<div class="readiness"><span>Готовность проекта</span><b>${v}%</b></div>
+    <div class="progress"><i style="width:${v}%"></i></div>`;
+}
+
+async function loadProjects() {
+  const list = $("projects-list");
+  loading(list);
   try {
     const { startups } = await api("GET", "/api/startups/my");
-
     if (startups.length === 0) {
-      showEmpty(container, "У вас пока нет проектов. Создайте первый — его увидят инвесторы, партнёры и будущая команда.");
+      empty(list, "Проектов пока нет. Пройдите проверку идеи — SOBRA покажет, что уже проработано, и поможет найти партнёра.");
       return;
     }
-
-    container.innerHTML = startups.map(renderMyStartup).join("");
+    list.innerHTML = startups.map((s) => `
+      <article class="card project-card" data-open="${s.id}">
+        <div class="project-row">
+          <span class="project-icon">${CATEGORY_ICON[s.category] || "💡"}</span>
+          <div class="grow">
+            <h3>${esc(s.name)}</h3>
+            <div class="chips">
+              ${s.status === "published" ? badge("Опубликован", "green") : badge("Черновик", "amber")}
+              ${badge(s.stage)} ${badge(s.category, "violet")}
+            </div>
+          </div>
+        </div>
+        ${s.readiness !== null && s.readiness !== undefined ? readinessBar(s.readiness) : ""}
+        <div class="actions"><button class="btn secondary small" type="button" data-open="${s.id}">Открыть карту проекта →</button></div>
+      </article>`).join("");
   } catch (error) {
-    showListError(container, error, loadMyStartups);
+    failed(list, error, loadProjects);
   }
 }
 
-function renderMyStartup(s) {
-  const status = STATUS_LABELS[s.status] || { text: s.status, cls: "" };
-  const actions =
-    s.status === "draft"
-      ? `<button class="btn btn-outline btn-small" data-action="publish" data-id="${s.id}">Опубликовать</button>
-         <button class="btn btn-danger btn-small" data-action="delete" data-id="${s.id}">Удалить</button>`
-      : "";
-
-  return `
-    <article class="card">
-      <div class="card-tags">
-        <span class="badge ${status.cls}">${status.text}</span>
-        <span class="badge badge-muted">${escapeHtml(s.category)}</span>
-        <span class="badge badge-muted">${escapeHtml(s.market_type)}</span>
-      </div>
-      <h3>${escapeHtml(s.name)}</h3>
-      <dl class="facts">
-        <div><dt>Стадия</dt><dd>${escapeHtml(s.stage)}</dd></div>
-        <div><dt>Ищет</dt><dd>${escapeHtml(seekingText(s))}</dd></div>
-      </dl>
-      ${actions ? `<div class="card-actions">${actions}</div>` : ""}
-    </article>`;
-}
-
-async function handleMyStartupAction(event) {
-  const button = event.target.closest("button[data-action]");
-  if (!button) return;
-
-  const id = button.dataset.id;
-
-  if (button.dataset.action === "publish") {
-    try {
-      await withBusy(button, "Публикуем…", () => api("POST", `/api/startups/${id}/publish`));
-      toast("Проект опубликован. Теперь его находят в поиске.");
-      loadMyStartups();
-    } catch (error) {
-      toast(error.message, "error");
-    }
-  }
-
-  if (button.dataset.action === "delete") {
-    if (!confirm("Удалить черновик? Это действие нельзя отменить.")) return;
-    try {
-      await withBusy(button, "Удаляем…", () => api("DELETE", `/api/startups/${id}`));
-      toast("Черновик удалён");
-      loadMyStartups();
-    } catch (error) {
-      toast(error.message, "error");
-    }
-  }
+function openProject(id) {
+  state.currentProjectId = Number(id);
+  show("project");
 }
 
 // ======================================================
-// НОВЫЙ СТАРТАП
+// ОСНОВАТЕЛЬ: ПРОВЕРКА ИДЕИ
 // ======================================================
 
-function setupCreateForm() {
-  const form = $("create-form");
+function questionField({ field, q, hint, required }) {
+  return `<label class="field wide"><span>${esc(q)}${required ? ' <b class="required">*</b>' : ""}</span>
+    <textarea class="input textarea" name="${field}" maxlength="1000" placeholder="${esc(hint)}"></textarea></label>`;
+}
 
-  $("open-create").addEventListener("click", () => {
+function setupIdeaForm() {
+  const form = $("idea-form");
+  $("idea-questions").innerHTML = [...BLOCKS, { ...PARTNER_QUESTION, required: true }].map(questionField).join("");
+
+  $("open-idea").addEventListener("click", () => {
     form.reset();
     $("investment-field").hidden = true;
-    showFormError("create-error", null);
-    openTab("create");
+    formError("idea-error", null);
+    show("idea");
   });
 
-  $("cancel-create").addEventListener("click", () => openTab("my-startups"));
-
-  form.seeking.addEventListener("change", () => {
-    $("investment-field").hidden = form.seeking.value !== "Инвестиции";
+  form.elements.seeking.addEventListener("change", () => {
+    $("investment-field").hidden = form.elements.seeking.value !== "Инвестиции";
   });
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    showFormError("create-error", null);
+    formError("idea-error", null);
+    const f = form.elements;
 
-    const required = ["name", "category", "market_type", "stage", "seeking", "problem", "solution", "traction"];
-    const empty = required.find((field) => !form.elements[field].value.trim());
-    if (empty) {
-      form.elements[empty].focus();
-      showFormError("create-error", new Error("Заполните все поля, чтобы сохранить проект."));
+    const required = ["name", "category", "market_type", "stage", "seeking", "customer", "problem", "solution", "partner_needed"];
+    const emptyField = required.find((name) => !f[name].value.trim());
+    if (emptyField) {
+      f[emptyField].focus();
+      formError("idea-error", new Error("Заполните поля со звёздочкой. Остальные можно дописать позже — они попадут в карту как «не проработано»."));
       return;
     }
 
     const body = {
-      name: form.elements.name.value.trim(),
-      category: form.category.value,
-      market_type: form.market_type.value,
-      stage: form.stage.value,
-      seeking: form.seeking.value,
-      problem: form.problem.value.trim(),
-      solution: form.solution.value.trim(),
-      traction: form.traction.value.trim(),
-      investment_amount: form.seeking.value === "Инвестиции" ? parseMoney(form.investment_amount.value) : null,
+      name: f.name.value.trim(),
+      category: f.category.value,
+      market_type: f.market_type.value,
+      stage: f.stage.value,
+      seeking: f.seeking.value,
+      investment_amount: f.seeking.value === "Инвестиции" ? parseMoney(f.investment_amount.value) : null,
     };
+    for (const { field } of [...BLOCKS, PARTNER_QUESTION]) body[field] = f[field].value.trim();
 
     const button = form.querySelector("button[type=submit]");
     try {
-      await withBusy(button, "Сохраняем…", () => api("POST", "/api/startups", body));
-      toast("Черновик сохранён. Опубликуйте его, когда будете готовы.");
-      openTab("my-startups");
+      const startup = await busy(button, "SOBRA анализирует ответы…", () => api("POST", "/api/startups", body));
+      toast("Карта проекта готова");
+      openProject(startup.id);
     } catch (error) {
-      showFormError("create-error", error);
+      formError("idea-error", error);
     }
   });
 }
 
 // ======================================================
-// ПОИСК
+// ОСНОВАТЕЛЬ: КАРТА ПРОЕКТА
 // ======================================================
 
-// Цель поиска → подходящий тип отклика
-const GOAL_TO_OFFER = { investment: "investment", pilot: "pilot", team: "team", partner: "partner" };
-
-let searchProfileLoaded = false;
-
-async function loadSearchProfile() {
-  if (searchProfileLoaded) return;
-  searchProfileLoaded = true;
-
+async function loadProject(id) {
+  const box = $("project-detail");
+  loading(box);
   try {
-    const profile = await api("GET", "/api/search/profile");
-    if (!profile) return;
+    renderProject(await api("GET", `/api/startups/${id}`));
+  } catch (error) {
+    failed(box, error, () => loadProject(id));
+  }
+}
 
-    const form = $("search-form");
-    form.goal.value = profile.goal || "";
-    form.category.value = profile.category || "Любая";
-    form.min_stage.value = profile.min_stage || "Идея";
-    if (profile.max_investment) {
-      form.max_investment.value = Number(profile.max_investment).toLocaleString("ru-RU");
+function renderProject(s) {
+  const map = s.idea_map || {};
+  const published = s.status === "published";
+  const nextSteps = BLOCKS.filter((b) => map[b.id] && map[b.id].status !== "confirmed").slice(0, 3);
+
+  $("project-detail").innerHTML = `
+    <div class="page-head">
+      <h1>Карта проекта</h1>
+      <p>Что уже подтверждено, где есть пробелы и какого партнёра не хватает.</p>
+    </div>
+
+    <section class="card">
+      <div class="project-row">
+        <span class="project-icon big">${CATEGORY_ICON[s.category] || "💡"}</span>
+        <div class="grow">
+          <h2>${esc(s.name)}</h2>
+          <div class="chips">
+            ${published ? badge("Опубликован", "green") : badge("Черновик", "amber")}
+            ${badge(s.stage)} ${badge(s.category, "violet")} ${badge(s.market_type, "gray")}
+          </div>
+        </div>
+      </div>
+      ${readinessBar(s.readiness)}
+      ${map._source === "rules" ? `<p class="ai-note">ИИ был недоступен, карта построена по простым правилам. Обновите любой блок, чтобы пересчитать.</p>` : ""}
+    </section>
+
+    <section class="card insight">
+      <p class="eyebrow">Кого ищем</p>
+      <h3>${esc(seekingText(s))}</h3>
+      <p>${esc(s.partner_needed || "Не указано")}</p>
+      ${published
+        ? `<button class="btn primary block" type="button" id="go-match">Подобрать партнёра →</button>`
+        : `<p class="muted">Опубликуйте проект, чтобы кандидаты могли откликаться, а ИИ — подбирать людей.</p>
+           <div class="actions">
+             <button class="btn danger small" type="button" id="delete-project">Удалить черновик</button>
+             <button class="btn primary" type="button" id="publish-project">Опубликовать</button>
+           </div>`}
+    </section>
+
+    <div class="map-grid">
+      ${BLOCKS.map((b) => mapCard(b, s, map[b.id])).join("")}
+    </div>
+
+    ${nextSteps.length ? `<section class="card">
+      <h2>Следующие шаги</h2>
+      <ol class="steps">${nextSteps.map((b) => `<li><b>${esc(b.title)}.</b> ${esc(map[b.id].comment)}</li>`).join("")}</ol>
+    </section>` : ""}
+  `;
+
+  const box = $("project-detail");
+  box.querySelectorAll("[data-edit]").forEach((btn) => btn.addEventListener("click", () => editBlock(s, btn.dataset.edit)));
+
+  if (published) {
+    $("go-match").addEventListener("click", () => show("match"));
+  } else {
+    $("publish-project").addEventListener("click", async (e) => {
+      try {
+        await busy(e.currentTarget, "Публикуем…", () => api("POST", `/api/startups/${s.id}/publish`));
+        toast("Проект опубликован. Теперь можно подобрать партнёра.");
+        loadProject(s.id);
+      } catch (error) {
+        toast(error.message, "error");
+      }
+    });
+    $("delete-project").addEventListener("click", async (e) => {
+      if (!confirm("Удалить черновик? Это действие нельзя отменить.")) return;
+      try {
+        await busy(e.currentTarget, "Удаляем…", () => api("DELETE", `/api/startups/${s.id}`));
+        toast("Черновик удалён");
+        show("projects");
+      } catch (error) {
+        toast(error.message, "error");
+      }
+    });
+  }
+}
+
+function mapCard(block, startup, item) {
+  const status = STATUS[item?.status] || STATUS.missing;
+  const answer = startup[block.field];
+  return `<article class="card map-card" id="block-${block.id}">
+    <div class="map-head"><h3>${esc(block.title)}</h3>${badge(status.text, status.tone)}</div>
+    <p class="answer">${answer ? esc(answer) : '<span class="muted">Нет ответа</span>'}</p>
+    ${item?.comment ? `<p class="next"><b>Что дальше:</b> ${esc(item.comment)}</p>` : ""}
+    <button class="text-btn" type="button" data-edit="${block.id}">Обновить блок →</button>
+  </article>`;
+}
+
+function editBlock(startup, blockId) {
+  const block = BLOCKS.find((b) => b.id === blockId);
+  const card = $(`block-${blockId}`);
+
+  card.innerHTML = `
+    <div class="map-head"><h3>${esc(block.title)}</h3></div>
+    <label class="field"><span>${esc(block.q)}</span>
+      <textarea class="input textarea" maxlength="1000" placeholder="${esc(block.hint)}">${esc(startup[block.field] || "")}</textarea></label>
+    <p class="form-error" hidden></p>
+    <div class="actions">
+      <button class="btn secondary small" type="button" data-cancel>Отмена</button>
+      <button class="btn primary small" type="button" data-save>Сохранить</button>
+    </div>`;
+
+  const textarea = card.querySelector("textarea");
+  const error = card.querySelector(".form-error");
+  textarea.focus();
+
+  card.querySelector("[data-cancel]").addEventListener("click", () => renderProject(startup));
+  card.querySelector("[data-save]").addEventListener("click", async (e) => {
+    const value = textarea.value.trim();
+    if (block.required && !value) {
+      error.hidden = false;
+      error.textContent = "Этот блок обязателен и не может быть пустым.";
+      return;
     }
-    if (profile.about) form.about.value = profile.about;
-    $("max-investment-field").hidden = form.goal.value !== "investment";
+    try {
+      const updated = await busy(e.currentTarget, "Пересчитываем…", () =>
+        api("PATCH", `/api/startups/${startup.id}`, { [block.field]: value })
+      );
+      toast("Блок обновлён, карта пересчитана");
+      renderProject(updated);
+    } catch (err) {
+      error.hidden = false;
+      error.textContent = err.message;
+    }
+  });
+}
+
+// ======================================================
+// ОСНОВАТЕЛЬ: ПОДБОР ПАРТНЁРА
+// ======================================================
+
+async function loadCandidates(id) {
+  const list = $("match-list");
+  loading(list, "ИИ сравнивает кандидатов с потребностью проекта. Это займёт несколько секунд…");
+  try {
+    const { candidates, ai } = await api("GET", `/api/startups/${id}/candidates`);
+    if (candidates.length === 0) {
+      empty(list, "Пока нет кандидатов, которые открыли профиль под такую потребность. Мы сообщим, когда они появятся — а пока проект видят в поиске.");
+      return;
+    }
+    list.innerHTML = aiNotice(ai, "") + candidates.map((c) => `
+      <article class="card">
+        <div class="person">
+          <span class="avatar">${esc((c.name || "?").split(" ").map((w) => w[0]).join("").slice(0, 2))}</span>
+          <div class="grow"><h3>${esc(c.name)}</h3><p class="muted">${esc(GOALS[c.goal] || "")}</p></div>
+        </div>
+        <p class="answer">${esc(c.about)}</p>
+        ${renderAi(c.ai)}
+        <div class="actions">
+          ${c.invited
+            ? `<button class="btn secondary" type="button" disabled>Приглашение отправлено ✓</button>`
+            : `<button class="btn primary" type="button" data-invite="${c.user_id}">Пригласить в проект</button>`}
+        </div>
+      </article>`).join("");
+  } catch (error) {
+    failed(list, error, () => loadCandidates(id));
+  }
+}
+
+async function handleInvite(event) {
+  const button = event.target.closest("[data-invite]");
+  if (!button) return;
+  try {
+    await busy(button, "Отправляем…", () =>
+      api("POST", `/api/startups/${state.currentProjectId}/invite`, { user_id: Number(button.dataset.invite) })
+    );
+    button.outerHTML = `<button class="btn secondary" type="button" disabled>Приглашение отправлено ✓</button>`;
+    toast("Приглашение отправлено. Кандидат получит сообщение в MAX.");
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+// ======================================================
+// КАНДИДАТ: ПРОФИЛЬ
+// ======================================================
+
+async function fetchProfile() {
+  state.profile = await api("GET", "/api/profile");
+  return state.profile;
+}
+
+async function loadProfile() {
+  const form = $("profile-form");
+  $("profile-name").value = state.user?.name || "";
+  formError("profile-error", null);
+  try {
+    const p = await fetchProfile();
+    form.elements.goal.value = p.goal || "";
+    form.elements.category.value = p.category || "Любая";
+    form.elements.about.value = p.about || "";
+    form.elements.visible.checked = p.visible;
+  } catch (error) {
+    formError("profile-error", error);
+  }
+}
+
+function setupProfileForm() {
+  const form = $("profile-form");
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    formError("profile-error", null);
+    const f = form.elements;
+
+    if (!f.goal.value) {
+      f.goal.focus();
+      formError("profile-error", new Error("Выберите, чего хотите."));
+      return;
+    }
+    if (!f.about.value.trim()) {
+      f.about.focus();
+      formError("profile-error", new Error("Расскажите о себе хотя бы в паре предложений — по этому тексту ИИ подбирает проекты."));
+      return;
+    }
+
+    const button = form.querySelector("button[type=submit]");
+    try {
+      state.profile = await busy(button, "Сохраняем…", () =>
+        api("PUT", "/api/profile", {
+          goal: f.goal.value,
+          category: f.category.value,
+          about: f.about.value.trim(),
+          visible: f.visible.checked,
+        })
+      );
+      toast(f.visible.checked ? "Профиль сохранён. Основатели смогут вас пригласить." : "Профиль сохранён.");
+    } catch (error) {
+      formError("profile-error", error);
+    }
+  });
+}
+
+// ======================================================
+// КАНДИДАТ: ПОИСК ПРОЕКТОВ
+// ======================================================
+
+async function prepareSearch() {
+  const form = $("search-form");
+  const hint = $("search-ai-hint");
+  try {
+    const p = state.profile || (await fetchProfile());
+    if (!form.elements.goal.value && p.goal) form.elements.goal.value = p.goal;
+    $("max-investment-field").hidden = form.elements.goal.value !== "investment";
+    hint.innerHTML = p.about
+      ? "✨ ИИ сравнит каждый проект с вашим профилем и объяснит, насколько вы подходите."
+      : `✨ Заполните <button class="text-btn" type="button" id="to-profile">профиль</button>, и ИИ объяснит, насколько вы подходите каждому проекту.`;
+    const link = $("to-profile");
+    if (link) link.addEventListener("click", () => show("profile"));
   } catch {
-    // Сохранённых фильтров нет или сервер недоступен — просто начинаем с пустой формы
+    hint.textContent = "";
   }
 }
 
 function setupSearchForm() {
   const form = $("search-form");
-
-  form.goal.addEventListener("change", () => {
-    $("max-investment-field").hidden = form.goal.value !== "investment";
+  form.elements.goal.addEventListener("change", () => {
+    $("max-investment-field").hidden = form.elements.goal.value !== "investment";
   });
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    showFormError("search-error", null);
+    formError("search-error", null);
+    const f = form.elements;
 
-    if (!form.goal.value) {
-      form.goal.focus();
-      showFormError("search-error", new Error("Выберите цель поиска."));
+    if (!f.goal.value) {
+      f.goal.focus();
+      formError("search-error", new Error("Выберите цель поиска."));
       return;
     }
 
     const body = {
-      goal: form.goal.value,
-      category: form.category.value,
-      min_stage: form.min_stage.value,
-      max_investment: form.goal.value === "investment" ? parseMoney(form.max_investment.value) : null,
-      about: form.about.value.trim() || null,
+      goal: f.goal.value,
+      category: f.category.value,
+      min_stage: f.min_stage.value,
+      max_investment: f.goal.value === "investment" ? parseMoney(f.max_investment.value) : null,
     };
-
     state.lastSearchGoal = body.goal;
 
-    const container = $("search-results");
+    const results = $("search-results");
     const button = form.querySelector("button[type=submit]");
-    showLoading(container, body.about ? "Подбираем проекты и сравниваем их с вашим опытом. Это займёт несколько секунд…" : undefined);
+    loading(results, state.profile?.about ? "Подбираем проекты и сравниваем их с вашим профилем…" : "Ищем проекты…");
 
     try {
-      const { matches, ai } = await withBusy(button, "Ищем…", () => api("POST", "/api/search", body));
-
+      const { matches, ai } = await busy(button, "Ищем…", () => api("POST", "/api/search", body));
       if (matches.length === 0) {
-        showEmpty(container, "Под эти фильтры проектов пока нет. Попробуйте категорию «Любая» или стадию пониже.");
+        empty(results, "Под эти фильтры проектов пока нет. Попробуйте сферу «Любая» или стадию пониже.");
         return;
       }
-
-      container.innerHTML = renderAiNotice(ai) + matches.map(renderMatch).join("");
+      results.innerHTML =
+        aiNotice(ai, "Заполните профиль, и ИИ объяснит, насколько вы подходите каждому проекту.") +
+        matches.map(({ startup, ai: aiItem }) => projectForCandidate(startup, aiItem)).join("");
     } catch (error) {
-      showListError(container, error, () => form.requestSubmit());
+      failed(results, error, () => form.requestSubmit());
     }
   });
 
-  $("search-results").addEventListener("click", (event) => {
-    const button = event.target.closest("button[data-action=respond]");
-    if (button) openOfferSheet(button.dataset.id, button.dataset.name);
-  });
+  $("search-results").addEventListener("click", respondClick);
 }
 
-// ======================================================
-// AI MATCHING
-// ======================================================
-
-const AI_VERDICTS = {
-  strong: { text: "Сильное соответствие", cls: "ai-strong" },
-  partial: { text: "Частичное соответствие", cls: "ai-partial" },
-  weak: { text: "Слабое соответствие", cls: "ai-weak" },
-};
-
-function renderAiNotice(ai) {
-  if (!ai) return "";
-  if (ai.status === "no_profile") {
-    return `<p class="ai-notice">Заполните поле «О себе», и ИИ объяснит, насколько вы подходите каждому проекту.</p>`;
-  }
-  if (ai.message) return `<p class="ai-notice">${escapeHtml(ai.message)}</p>`;
-  return "";
-}
-
-function renderAiList(icon, title, items) {
-  if (!items || items.length === 0) return "";
-  return `
-    <div class="ai-group">
-      <p class="ai-group-title">${icon} ${title}</p>
-      <ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
-    </div>`;
-}
-
-function renderAi(ai) {
-  if (!ai) return "";
-  const verdict = AI_VERDICTS[ai.verdict] || AI_VERDICTS.partial;
-
-  return `
-    <section class="ai-block ${verdict.cls}">
-      <p class="ai-head"><strong>${verdict.text}</strong> <span>${ai.score} из 100</span></p>
-      ${renderAiList("✅", "Почему подходите", ai.reasons)}
-      ${renderAiList("⚠️", "Чего не хватает", ai.missing)}
-      ${renderAiList("❓", "Что уточнить перед знакомством", ai.clarify)}
-      <p class="ai-note">Оценка ИИ по тексту карточки и вашему описанию. Проверьте детали при знакомстве.</p>
-    </section>`;
-}
-
-function renderMatch({ startup: s, matched, total, ai }) {
+// Карточка чужого проекта (в поиске и в приглашениях)
+function projectForCandidate(s, ai) {
   const isOwn = state.user && Number(s.founder_id) === state.user.user_id;
+  const rows = [
+    ["Клиент", s.customer], ["Проблема", s.problem], ["Решение", s.solution],
+    ["Спрос", s.traction], ["Кого ищут", s.partner_needed],
+  ].filter(([, v]) => v);
 
-  return `
-    <article class="card">
-      <div class="card-tags">
-        <span class="badge badge-match">Совпадение ${matched} из ${total}</span>
-        <span class="badge badge-muted">${escapeHtml(s.category)}</span>
-        <span class="badge badge-muted">${escapeHtml(s.market_type)}</span>
+  return `<article class="card">
+    <div class="project-row">
+      <span class="project-icon">${CATEGORY_ICON[s.category] || "💡"}</span>
+      <div class="grow">
+        <h3>${esc(s.name)}</h3>
+        <div class="chips">${badge(s.stage)} ${badge(s.category, "violet")} ${badge(s.market_type, "gray")}</div>
       </div>
-      <h3>${escapeHtml(s.name)}</h3>
-      <dl class="facts">
-        <div><dt>Стадия</dt><dd>${escapeHtml(s.stage)}</dd></div>
-        <div><dt>Ищет</dt><dd>${escapeHtml(seekingText(s))}</dd></div>
-      </dl>
-      <p class="card-text"><strong>Проблема.</strong> ${escapeHtml(s.problem)}</p>
-      <p class="card-text"><strong>Решение.</strong> ${escapeHtml(s.solution)}</p>
-      <p class="card-text"><strong>Трэкшн.</strong> ${escapeHtml(s.traction)}</p>
-      ${renderAi(ai)}
-      ${
-        isOwn
-          ? `<p class="hint">Это ваш проект</p>`
-          : `<button class="btn btn-primary btn-block" data-action="respond" data-id="${s.id}" data-name="${escapeHtml(s.name)}">Откликнуться</button>`
-      }
-    </article>`;
+    </div>
+    <p class="muted">Ищет: ${esc(seekingText(s))}</p>
+    ${rows.map(([k, v]) => `<p class="answer"><b>${k}.</b> ${esc(v)}</p>`).join("")}
+    ${renderAi(ai, "Почему вы подходите")}
+    ${isOwn
+      ? `<p class="muted">Это ваш проект</p>`
+      : `<button class="btn primary block" type="button" data-respond="${s.id}" data-name="${esc(s.name)}">Откликнуться</button>`}
+  </article>`;
 }
 
 // ======================================================
-// ОТКЛИК (ПРЕДЛОЖЕНИЕ)
+// ОТКЛИК
 // ======================================================
 
-function openOfferSheet(startupId, startupName) {
+function respondClick(event) {
+  const button = event.target.closest("[data-respond]");
+  if (button) openOfferSheet(button.dataset.respond, button.dataset.name);
+}
+
+function openOfferSheet(startupId, name) {
   const form = $("offer-form");
   form.reset();
-  showFormError("offer-error", null);
-
+  formError("offer-error", null);
   state.offerStartupId = Number(startupId);
-  $("offer-project").textContent = startupName;
-  if (state.lastSearchGoal) form.type.value = GOAL_TO_OFFER[state.lastSearchGoal];
-
+  $("offer-project").textContent = name;
+  const goal = state.lastSearchGoal || state.profile?.goal;
+  if (goal) form.elements.type.value = goal;
   $("offer-sheet").hidden = false;
-  form.message.focus();
+  form.elements.message.focus();
 }
 
 function closeOfferSheet() {
@@ -492,157 +717,123 @@ function closeOfferSheet() {
 
 function setupOfferForm() {
   const form = $("offer-form");
-
   $("offer-cancel").addEventListener("click", closeOfferSheet);
-  $("offer-sheet").addEventListener("click", (event) => {
-    if (event.target.id === "offer-sheet") closeOfferSheet();
+  $("offer-sheet").addEventListener("click", (e) => {
+    if (e.target.id === "offer-sheet") closeOfferSheet();
   });
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    showFormError("offer-error", null);
-
-    if (!form.message.value.trim()) {
-      form.message.focus();
-      showFormError("offer-error", new Error("Напишите пару слов основателю — без сообщения отклик не отправить."));
+    formError("offer-error", null);
+    if (!form.elements.message.value.trim()) {
+      form.elements.message.focus();
+      formError("offer-error", new Error("Напишите пару слов основателю — без сообщения отклик не отправить."));
       return;
     }
-
     const button = form.querySelector("button[type=submit]");
     try {
-      await withBusy(button, "Отправляем…", () =>
+      await busy(button, "Отправляем…", () =>
         api("POST", "/api/offers", {
           startup_id: state.offerStartupId,
-          type: form.type.value,
-          message: form.message.value.trim(),
+          type: form.elements.type.value,
+          message: form.elements.message.value.trim(),
         })
       );
       closeOfferSheet();
       toast("Отклик отправлен. Основатель получит уведомление в MAX.");
     } catch (error) {
-      showFormError("offer-error", error);
+      formError("offer-error", error);
     }
   });
 }
 
 // ======================================================
-// ПРЕДЛОЖЕНИЯ ПО МОИМ ПРОЕКТАМ
+// ОТКЛИКИ И ПРИГЛАШЕНИЯ
 // ======================================================
 
-const OFFER_STATUS = {
-  new: { text: "Новое", cls: "badge-new" },
-  accepted: { text: "Принято", cls: "badge-published" },
-  rejected: { text: "Отклонено", cls: "badge-muted" },
-};
-
-async function loadOffers() {
-  const container = $("offers-list");
-  showLoading(container);
+async function loadResponses() {
+  const offersEl = $("offers-list");
+  const invitesEl = $("invites-list");
+  loading(offersEl);
+  loading(invitesEl);
 
   try {
-    const { offers } = await api("GET", "/api/offers/received");
+    const [{ offers }, { invites }] = await Promise.all([api("GET", "/api/offers/received"), api("GET", "/api/invites")]);
 
     if (offers.length === 0) {
-      showEmpty(container, "Предложений пока нет. Они появятся здесь, когда кто-то откликнется на ваш опубликованный проект.");
-      return;
+      empty(offersEl, "Откликов пока нет. Они появятся, когда кто-то откликнется на ваш опубликованный проект.");
+    } else {
+      offersEl.innerHTML = offers.map((o) => {
+        const st = OFFER_STATUS[o.status] || { text: o.status, tone: "gray" };
+        return `<article class="card">
+          <div class="chips">${badge(st.text, st.tone)} ${badge(o.type, "gray")}</div>
+          <h3>${esc(o.startup_name)}</h3>
+          <p class="muted">От: ${esc(o.sender_name || "пользователь MAX")} · ${dateText(o.created_at)}</p>
+          <p class="answer">${esc(o.message)}</p>
+          ${o.status === "new" ? `<div class="actions">
+            <button class="btn secondary small" type="button" data-decide="reject" data-id="${o.id}">Отклонить</button>
+            <button class="btn primary small" type="button" data-decide="accept" data-id="${o.id}">Принять</button>
+          </div>` : ""}
+        </article>`;
+      }).join("");
     }
 
-    container.innerHTML = offers.map(renderOffer).join("");
+    if (invites.length === 0) {
+      empty(invitesEl, "Приглашений пока нет. Откройте профиль для основателей во вкладке «Профиль», чтобы они могли вас найти.");
+    } else {
+      invitesEl.innerHTML = invites.map((s) => projectForCandidate(s, null)).join("");
+    }
   } catch (error) {
-    showListError(container, error, loadOffers);
+    failed(offersEl, error, loadResponses);
+    invitesEl.innerHTML = "";
   }
 }
 
-function renderOffer(o) {
-  const status = OFFER_STATUS[o.status] || { text: o.status, cls: "" };
-  const actions =
-    o.status === "new"
-      ? `<div class="card-actions">
-           <button class="btn btn-primary btn-small" data-action="accept" data-id="${o.id}">Принять</button>
-           <button class="btn btn-secondary btn-small" data-action="reject" data-id="${o.id}">Отклонить</button>
-         </div>`
-      : "";
-
-  return `
-    <article class="card">
-      <div class="card-tags">
-        <span class="badge ${status.cls}">${status.text}</span>
-        <span class="badge badge-muted">${escapeHtml(o.type)}</span>
-      </div>
-      <h3>${escapeHtml(o.startup_name)}</h3>
-      <p class="card-sub">От: ${escapeHtml(o.sender_name || "пользователь MAX")} · ${formatDate(o.created_at)}</p>
-      <p class="card-text">${escapeHtml(o.message)}</p>
-      ${actions}
-    </article>`;
-}
-
-async function handleOfferAction(event) {
-  const button = event.target.closest("button[data-action]");
+async function handleDecision(event) {
+  const button = event.target.closest("[data-decide]");
   if (!button) return;
-
-  const id = button.dataset.id;
-  const accept = button.dataset.action === "accept";
-
+  const accept = button.dataset.decide === "accept";
   try {
-    await withBusy(button, accept ? "Принимаем…" : "Отклоняем…", () =>
-      api("POST", `/api/offers/${id}/${accept ? "accept" : "reject"}`)
+    await busy(button, accept ? "Принимаем…" : "Отклоняем…", () =>
+      api("POST", `/api/offers/${button.dataset.id}/${accept ? "accept" : "reject"}`)
     );
-    toast(accept ? "Предложение принято — это MATCH. Контакт появился во вкладке «Контакты»." : "Предложение отклонено");
-    loadOffers();
+    toast(accept ? "Это MATCH! Кандидат появился во вкладке «Контакты»." : "Отклик отклонён");
+    loadResponses();
   } catch (error) {
     toast(error.message, "error");
   }
 }
 
 // ======================================================
-// КОНТАКТЫ / MATCH
+// КОНТАКТЫ
 // ======================================================
 
 async function loadContacts() {
   const contactsEl = $("contacts-list");
   const matchesEl = $("matches-list");
-  showLoading(contactsEl);
-  showLoading(matchesEl);
+  loading(contactsEl);
+  loading(matchesEl);
 
   try {
-    const [{ contacts }, { matches }] = await Promise.all([
-      api("GET", "/api/contacts"),
-      api("GET", "/api/matches"),
-    ]);
+    const [{ contacts }, { matches }] = await Promise.all([api("GET", "/api/contacts"), api("GET", "/api/matches")]);
 
-    if (contacts.length === 0) {
-      showEmpty(contactsEl, "Здесь появятся кандидаты, чьи предложения вы примете.");
-    } else {
-      contactsEl.innerHTML = contacts
-        .map(
-          (c) => `
-        <article class="card">
-          <div class="card-tags"><span class="badge badge-muted">${escapeHtml(c.type)}</span></div>
-          <h3>${escapeHtml(c.candidate_name || "Пользователь MAX")}</h3>
-          <p class="card-sub">Проект: ${escapeHtml(c.startup_name)} · ${formatDate(c.created_at)}</p>
-          <p class="card-text">${escapeHtml(c.message)}</p>
-        </article>`
-        )
-        .join("");
-    }
+    if (contacts.length === 0) empty(contactsEl, "Здесь появятся кандидаты, чьи отклики вы примете.");
+    else contactsEl.innerHTML = contacts.map((c) => `<article class="card">
+        <div class="chips">${badge("MATCH", "green")} ${badge(c.type, "gray")}</div>
+        <h3>${esc(c.candidate_name || "Пользователь MAX")}</h3>
+        <p class="muted">Проект: ${esc(c.startup_name)} · ${dateText(c.created_at)}</p>
+        <p class="answer">${esc(c.message)}</p>
+      </article>`).join("");
 
-    if (matches.length === 0) {
-      showEmpty(matchesEl, "Здесь появятся проекты, основатели которых приняли ваш отклик.");
-    } else {
-      matchesEl.innerHTML = matches
-        .map(
-          (m) => `
-        <article class="card">
-          <div class="card-tags"><span class="badge badge-published">MATCH</span></div>
-          <h3>${escapeHtml(m.startup_name)}</h3>
-          <p class="card-sub">Ваш отклик: ${escapeHtml(m.type)} · ${formatDate(m.created_at)}</p>
-          <p class="card-text">${escapeHtml(m.message)}</p>
-        </article>`
-        )
-        .join("");
-    }
+    if (matches.length === 0) empty(matchesEl, "Здесь появятся проекты, основатели которых приняли ваш отклик.");
+    else matchesEl.innerHTML = matches.map((m) => `<article class="card">
+        <div class="chips">${badge("MATCH", "green")} ${badge(m.type, "gray")}</div>
+        <h3>${esc(m.startup_name)}</h3>
+        <p class="muted">Ваш отклик · ${dateText(m.created_at)}</p>
+        <p class="answer">${esc(m.message)}</p>
+      </article>`).join("");
   } catch (error) {
-    showListError(contactsEl, error, loadContacts);
+    failed(contactsEl, error, loadContacts);
     matchesEl.innerHTML = "";
   }
 }
@@ -652,16 +843,15 @@ async function loadContacts() {
 // ======================================================
 
 function showAuthError(message) {
-  document.querySelectorAll(".tab-content").forEach((t) => t.classList.remove("active"));
-  $("app-nav").hidden = true;
-  $("auth-error").hidden = false;
-  $("auth-error-text").textContent = message;
-  $("user-info").textContent = "Не авторизован";
+  document.querySelectorAll(".view").forEach((v) => (v.hidden = true));
+  $("tabbar").hidden = true;
+  $("view-auth").hidden = false;
+  $("auth-text").textContent = message;
+  $("user-name").textContent = "Не авторизован";
 }
 
 async function authorize() {
-  $("auth-error").hidden = true;
-  $("app-nav").hidden = false;
+  $("tabbar").hidden = false;
 
   if (!initData && !debugUserId) {
     showAuthError("Мини-приложение работает только внутри MAX. Откройте его из чата с ботом SOBRA.");
@@ -669,19 +859,18 @@ async function authorize() {
   }
 
   try {
-    if (initData) {
-      state.user = await api("POST", "/api/auth", { init_data: initData });
-    } else {
-      // Режим отладки в браузере: /api/auth требует initData, поэтому берём id из параметра
-      state.user = { user_id: Number(debugUserId), name: "Отладка" };
-    }
+    state.user = initData
+      ? await api("POST", "/api/auth", { init_data: initData })
+      : { user_id: Number(debugUserId), name: "Отладка" };
 
-    $("user-info").textContent = state.user.name || `ID: ${state.user.user_id}`;
-    openTab("my-startups");
+    const name = state.user.name || `ID ${state.user.user_id}`;
+    $("user-name").textContent = name;
+    $("user-avatar").textContent = name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+    show("projects");
   } catch (error) {
     showAuthError(
       error.status === 401
-        ? "Сессия MAX устарела или недействительна. Закройте мини-приложение и откройте его снова из чата с ботом."
+        ? "Сессия MAX устарела. Закройте мини-приложение и откройте его снова из чата с ботом."
         : error.message
     );
   }
@@ -691,12 +880,18 @@ document.addEventListener("DOMContentLoaded", () => {
   if (WebApp && typeof WebApp.ready === "function") WebApp.ready();
 
   setupNavigation();
-  setupCreateForm();
+  setupIdeaForm();
+  setupProfileForm();
   setupSearchForm();
   setupOfferForm();
 
-  $("my-startups-list").addEventListener("click", handleMyStartupAction);
-  $("offers-list").addEventListener("click", handleOfferAction);
+  $("projects-list").addEventListener("click", (e) => {
+    const target = e.target.closest("[data-open]");
+    if (target) openProject(target.dataset.open);
+  });
+  $("match-list").addEventListener("click", handleInvite);
+  $("offers-list").addEventListener("click", handleDecision);
+  $("invites-list").addEventListener("click", respondClick);
   $("auth-retry").addEventListener("click", authorize);
 
   authorize();
