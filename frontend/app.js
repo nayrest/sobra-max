@@ -547,15 +547,91 @@ async function fetchProfile() {
   return state.profile;
 }
 
-/** Нормализация российского номера → +7XXXXXXXXXX или null */
-function normalizeRuPhone(raw) {
-  if (!raw) return null;
+/** Извлечь 10 цифр номера РФ (без кода страны) */
+function extractRuPhoneDigits(raw) {
+  if (!raw) return "";
   let digits = String(raw).replace(/\D/g, "");
-  if (digits.length === 11 && (digits[0] === "7" || digits[0] === "8")) {
+  if (digits.length >= 11 && (digits[0] === "7" || digits[0] === "8")) {
     digits = digits.slice(1);
   }
+  // если вставили с лишними цифрами — берём первые 10
+  return digits.slice(0, 10);
+}
+
+/** Нормализация российского номера → +7XXXXXXXXXX или null */
+function normalizeRuPhone(raw) {
+  const digits = extractRuPhoneDigits(raw);
   if (digits.length !== 10) return null;
   return `+7${digits}`;
+}
+
+/** Отображение: +7 (900) 123-45-67 */
+function formatRuPhone(raw) {
+  const d = extractRuPhoneDigits(raw);
+  if (!d.length) return "";
+  let out = "+7";
+  if (d.length > 0) out += " (" + d.slice(0, Math.min(3, d.length));
+  if (d.length >= 3) out += ")";
+  if (d.length > 3) out += " " + d.slice(3, Math.min(6, d.length));
+  if (d.length > 6) out += "-" + d.slice(6, Math.min(8, d.length));
+  if (d.length > 8) out += "-" + d.slice(8, 10);
+  return out;
+}
+
+function setupPhoneMask(input) {
+  if (!input || input.dataset.phoneMask === "1") return;
+  input.dataset.phoneMask = "1";
+  input.setAttribute("placeholder", "+7 (900) 123-45-67");
+  input.setAttribute("inputmode", "tel");
+  input.setAttribute("autocomplete", "tel");
+  input.setAttribute("maxlength", "18");
+
+  const apply = () => {
+    const formatted = formatRuPhone(input.value);
+    // сохраняем позицию курсора относительно количества цифр слева
+    const sel = input.selectionStart ?? input.value.length;
+    const digitsBefore = extractRuPhoneDigits(input.value.slice(0, sel)).length;
+    input.value = formatted;
+    // ставим курсор после той же «цифры»
+    let pos = 0;
+    let seen = 0;
+    while (pos < formatted.length && seen < digitsBefore) {
+      if (/\d/.test(formatted[pos])) seen++;
+      pos++;
+    }
+    // если после цифры идёт служебный символ закрытия — перескакиваем
+    while (pos < formatted.length && !/\d/.test(formatted[pos]) && formatted[pos] !== "+") {
+      // не уходим вперёд слишком агрессивно при наборе середины
+      if (formatted[pos] === " " || formatted[pos] === "-" || formatted[pos] === ")") pos++;
+      else break;
+    }
+    try {
+      input.setSelectionRange(pos, pos);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  input.addEventListener("input", apply);
+  input.addEventListener("paste", () => setTimeout(apply, 0));
+  input.addEventListener("focus", () => {
+    if (!extractRuPhoneDigits(input.value).length) {
+      input.value = "+7 (";
+      try {
+        input.setSelectionRange(input.value.length, input.value.length);
+      } catch {
+        /* ignore */
+      }
+    }
+  });
+  input.addEventListener("blur", () => {
+    const d = extractRuPhoneDigits(input.value);
+    if (!d.length) {
+      input.value = "";
+      return;
+    }
+    input.value = formatRuPhone(d);
+  });
 }
 
 function displayNameFromProfile(p, fallback) {
@@ -609,7 +685,7 @@ async function loadProfile() {
     form.elements.first_name.value = p.first_name || "";
     form.elements.patronymic.value = p.patronymic || "";
     form.elements.email.value = p.email || "";
-    form.elements.phone.value = p.phone || "";
+    form.elements.phone.value = p.phone ? formatRuPhone(p.phone) : "";
     form.elements.goal.value = p.goal || "";
     form.elements.category.value = p.category || "Любая";
     form.elements.about.value = p.about || "";
@@ -622,6 +698,8 @@ async function loadProfile() {
 
 function setupProfileForm() {
   const form = $("profile-form");
+  setupPhoneMask(form.elements.phone);
+
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     formError("profile-error", null);
