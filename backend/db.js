@@ -204,18 +204,21 @@ async function findMatches(criteria) {
 // ======================================================
 
 async function saveSearchProfile(userId, criteria) {
-  // about и visible приходят только из мини-приложения. Бот их не передаёт,
+  // about, visible и контакты приходят только из мини-приложения. Бот их не передаёт,
   // поэтому при их отсутствии сохраняем прежние значения (COALESCE).
   await pool.query(
-    `INSERT INTO search_profiles (user_id, goal, category, min_stage, max_investment, about, visible)
-     VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, FALSE))
+    `INSERT INTO search_profiles (user_id, goal, category, min_stage, max_investment, about, visible, full_name, email, phone)
+     VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, FALSE), $8, $9, $10)
      ON CONFLICT (user_id) DO UPDATE SET
        goal = EXCLUDED.goal,
        category = EXCLUDED.category,
        min_stage = EXCLUDED.min_stage,
        max_investment = EXCLUDED.max_investment,
        about = COALESCE($6, search_profiles.about),
-       visible = COALESCE($7, search_profiles.visible)`,
+       visible = COALESCE($7, search_profiles.visible),
+       full_name = COALESCE($8, search_profiles.full_name),
+       email = COALESCE($9, search_profiles.email),
+       phone = COALESCE($10, search_profiles.phone)`,
     [
       userId,
       criteria.goal,
@@ -224,6 +227,9 @@ async function saveSearchProfile(userId, criteria) {
       criteria.max_investment || null,
       criteria.about || null,
       typeof criteria.visible === "boolean" ? criteria.visible : null,
+      criteria.full_name || null,
+      criteria.email || null,
+      criteria.phone || null,
     ]
   );
 }

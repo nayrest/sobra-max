@@ -549,7 +549,6 @@ async function fetchProfile() {
 
 async function loadProfile() {
   const form = $("profile-form");
-  $("profile-name").value = state.user?.name || "";
   formError("profile-error", null);
 
   const head = document.querySelector("#view-profile .page-head");
@@ -561,12 +560,15 @@ async function loadProfile() {
     } else {
       head.querySelector("h1").textContent = "Мой профиль";
       head.querySelector("p").textContent =
-        "Расскажите о себе. По этому тексту ИИ подбирает вам проекты, а основатели находят вас сами.";
+        "Контакты и описание. По ним ИИ подбирает проекты, а основатели находят вас сами.";
     }
   }
 
   try {
     const p = await fetchProfile();
+    form.elements.full_name.value = p.full_name || state.user?.name || "";
+    form.elements.email.value = p.email || "";
+    form.elements.phone.value = p.phone || "";
     form.elements.goal.value = p.goal || "";
     form.elements.category.value = p.category || "Любая";
     form.elements.about.value = p.about || "";
@@ -583,6 +585,21 @@ function setupProfileForm() {
     formError("profile-error", null);
     const f = form.elements;
 
+    if (!f.full_name.value.trim()) {
+      f.full_name.focus();
+      formError("profile-error", new Error("Укажите ФИО."));
+      return;
+    }
+    if (!f.email.value.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email.value.trim())) {
+      f.email.focus();
+      formError("profile-error", new Error("Укажите корректный e-mail."));
+      return;
+    }
+    if (!f.phone.value.trim()) {
+      f.phone.focus();
+      formError("profile-error", new Error("Укажите номер телефона."));
+      return;
+    }
     if (!f.goal.value) {
       f.goal.focus();
       formError("profile-error", new Error("Выберите, чего хотите."));
@@ -598,6 +615,9 @@ function setupProfileForm() {
     try {
       state.profile = await busy(button, "Сохраняем…", () =>
         api("PUT", "/api/profile", {
+          full_name: f.full_name.value.trim(),
+          email: f.email.value.trim(),
+          phone: f.phone.value.trim(),
           goal: f.goal.value,
           category: f.category.value,
           about: f.about.value.trim(),
@@ -870,7 +890,18 @@ function showAuthError(message) {
 }
 
 function needsOnboarding(profile) {
-  return !profile || !profile.goal || !profile.about || !String(profile.about).trim();
+  return (
+    !profile ||
+    !profile.goal ||
+    !profile.about ||
+    !String(profile.about).trim() ||
+    !profile.full_name ||
+    !String(profile.full_name).trim() ||
+    !profile.email ||
+    !String(profile.email).trim() ||
+    !profile.phone ||
+    !String(profile.phone).trim()
+  );
 }
 
 async function authorize() {

@@ -81,6 +81,11 @@ ALTER TABLE startups ADD COLUMN IF NOT EXISTS readiness INTEGER;
 -- Кандидат сам разрешает основателям находить его профиль
 ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS visible BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- Контактные данные кандидата (заполняются в мини-приложении)
+ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS full_name TEXT;
+ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS email TEXT;
+ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS phone TEXT;
+
 CREATE TABLE IF NOT EXISTS invites (
   id          SERIAL PRIMARY KEY,
   startup_id  INTEGER NOT NULL REFERENCES startups (id) ON DELETE CASCADE,

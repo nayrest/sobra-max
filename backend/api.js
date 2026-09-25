@@ -363,6 +363,9 @@ function createApi({ notify = {} } = {}) {
     const profile = await db.getSearchProfile(req.user.userId);
     res.json({
       name: req.user.name,
+      full_name: profile?.full_name || req.user.name || "",
+      email: profile?.email || "",
+      phone: profile?.phone || "",
       goal: profile?.goal || null,
       category: profile?.category || "Любая",
       about: profile?.about || "",
@@ -374,6 +377,12 @@ function createApi({ notify = {} } = {}) {
     const body = req.body || {};
     const current = await db.getSearchProfile(req.user.userId);
 
+    const fullName = requireText(body, "full_name", 150);
+    const email = requireText(body, "email", 200);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new ApiError(400, "Укажите корректный e-mail");
+    }
+    const phone = requireText(body, "phone", 30);
     const goal = requireOneOf(body.goal, Object.keys(SEEKING), "goal");
     const about = requireText(body, "about", 1500);
     const visible = body.visible === true;
@@ -385,9 +394,21 @@ function createApi({ notify = {} } = {}) {
       max_investment: current?.max_investment || null,
       about,
       visible,
+      full_name: fullName,
+      email,
+      phone,
     });
 
-    res.json({ name: req.user.name, goal, category: body.category || "Любая", about, visible });
+    res.json({
+      name: req.user.name,
+      full_name: fullName,
+      email,
+      phone,
+      goal,
+      category: body.category || "Любая",
+      about,
+      visible,
+    });
   }));
 
   // ---------- подбор людей для основателя и приглашения ----------

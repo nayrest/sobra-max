@@ -143,8 +143,12 @@
       </div>
       <form id="profile-form" class="card" novalidate>
         <div class="form-grid">
-          <label class="field wide"><span>Имя</span>
-            <input class="input" id="profile-name" disabled></label>
+          <label class="field wide"><span>ФИО <b class="required">*</b></span>
+            <input class="input" name="full_name" maxlength="150" placeholder="Иванов Иван Иванович" autocomplete="name"></label>
+          <label class="field"><span>E-mail <b class="required">*</b></span>
+            <input class="input" name="email" type="email" maxlength="200" placeholder="name@example.com" autocomplete="email"></label>
+          <label class="field"><span>Телефон <b class="required">*</b></span>
+            <input class="input" name="phone" type="tel" maxlength="30" placeholder="+7 900 123-45-67" autocomplete="tel"></label>
           <label class="field"><span>Чего хотите <b class="required">*</b></span>
             <select class="input" name="goal">
               <option value="">Выберите</option>
