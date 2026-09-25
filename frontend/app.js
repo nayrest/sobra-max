@@ -686,11 +686,18 @@ function setupPhoneMask(input) {
   });
 }
 
+/** В шапке: «Иванов И.» (фамилия + инициал имени) */
 function displayNameFromProfile(p, fallback) {
-  if (p?.last_name || p?.first_name) {
-    return [p.last_name, p.first_name].filter(Boolean).join(" ").trim();
+  const last = p?.last_name && String(p.last_name).trim();
+  const first = p?.first_name && String(p.first_name).trim();
+  if (last && first) return `${last} ${first[0].toUpperCase()}.`;
+  if (last) return last;
+  if (first) return first;
+  if (p?.full_name) {
+    const parts = String(p.full_name).trim().split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return `${parts[0]} ${parts[1][0].toUpperCase()}.`;
+    return parts[0] || "";
   }
-  if (p?.full_name) return String(p.full_name).trim();
   return fallback || "";
 }
 
