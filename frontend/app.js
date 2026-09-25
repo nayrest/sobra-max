@@ -77,8 +77,6 @@ const STATUS = {
 const GOALS = {
   team: "Войти в команду",
   partner: "Партнёрство",
-  investment: "Инвестировать",
-  pilot: "Пилот / стать клиентом",
 };
 
 const CATEGORY_ICON = {
@@ -176,9 +174,7 @@ async function busy(button, text, action) {
 }
 
 function seekingText(s) {
-  let text = s.seeking || "Не указано";
-  if (s.seeking === "Инвестиции" && s.investment_amount) text += `, ${money(s.investment_amount)}`;
-  return text;
+  return s.seeking || "Не указано";
 }
 
 // ======================================================
@@ -214,7 +210,16 @@ function show(view) {
 }
 
 function setupNavigation() {
-  document.querySelectorAll("#tabbar button").forEach((b) => b.addEventListener("click", () => show(b.dataset.tab)));
+  document.querySelectorAll("#tabbar button").forEach((b) =>
+    b.addEventListener("click", () => {
+      if (state.onboarding && b.dataset.tab !== "profile") {
+        toast("Сначала заполните профиль");
+        show("profile");
+        return;
+      }
+      show(b.dataset.tab);
+    })
+  );
   document.querySelectorAll("[data-back]").forEach((b) => b.addEventListener("click", () => show(b.dataset.back)));
   $("match-back").addEventListener("click", () => show("project"));
 }
@@ -308,13 +313,8 @@ function setupIdeaForm() {
 
   $("open-idea").addEventListener("click", () => {
     form.reset();
-    $("investment-field").hidden = true;
     formError("idea-error", null);
     show("idea");
-  });
-
-  form.elements.seeking.addEventListener("change", () => {
-    $("investment-field").hidden = form.elements.seeking.value !== "Инвестиции";
   });
 
   form.addEventListener("submit", async (event) => {
@@ -336,7 +336,7 @@ function setupIdeaForm() {
       market_type: f.market_type.value,
       stage: f.stage.value,
       seeking: f.seeking.value,
-      investment_amount: f.seeking.value === "Инвестиции" ? parseMoney(f.investment_amount.value) : null,
+      investment_amount: null,
     };
     for (const { field } of [...BLOCKS, PARTNER_QUESTION]) body[field] = f[field].value.trim();
 
@@ -551,6 +551,20 @@ async function loadProfile() {
   const form = $("profile-form");
   $("profile-name").value = state.user?.name || "";
   formError("profile-error", null);
+
+  const head = document.querySelector("#view-profile .page-head");
+  if (head) {
+    if (state.onboarding) {
+      head.querySelector("h1").textContent = "Создание профиля";
+      head.querySelector("p").textContent =
+        "При первом входе заполните профиль кандидата. По этим данным ИИ будет подбирать проекты, а основатели — находить вас.";
+    } else {
+      head.querySelector("h1").textContent = "Мой профиль";
+      head.querySelector("p").textContent =
+        "Расскажите о себе. По этому тексту ИИ подбирает вам проекты, а основатели находят вас сами.";
+    }
+  }
+
   try {
     const p = await fetchProfile();
     form.elements.goal.value = p.goal || "";
@@ -590,7 +604,16 @@ function setupProfileForm() {
           visible: f.visible.checked,
         })
       );
-      toast(f.visible.checked ? "Профиль сохранён. Основатели смогут вас пригласить." : "Профиль сохранён.");
+      const wasOnboarding = state.onboarding;
+      state.onboarding = false;
+      toast(
+        wasOnboarding
+          ? "Профиль создан! Теперь можно искать проекты и публиковать свои идеи."
+          : f.visible.checked
+            ? "Профиль сохранён. Основатели смогут вас пригласить."
+            : "Профиль сохранён."
+      );
+      if (wasOnboarding) show("projects");
     } catch (error) {
       formError("profile-error", error);
     }
@@ -607,7 +630,6 @@ async function prepareSearch() {
   try {
     const p = state.profile || (await fetchProfile());
     if (!form.elements.goal.value && p.goal) form.elements.goal.value = p.goal;
-    $("max-investment-field").hidden = form.elements.goal.value !== "investment";
     hint.innerHTML = p.about
       ? "✨ ИИ сравнит каждый проект с вашим профилем и объяснит, насколько вы подходите."
       : `✨ Заполните <button class="text-btn" type="button" id="to-profile">профиль</button>, и ИИ объяснит, насколько вы подходите каждому проекту.`;
@@ -620,9 +642,6 @@ async function prepareSearch() {
 
 function setupSearchForm() {
   const form = $("search-form");
-  form.elements.goal.addEventListener("change", () => {
-    $("max-investment-field").hidden = form.elements.goal.value !== "investment";
-  });
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -639,7 +658,7 @@ function setupSearchForm() {
       goal: f.goal.value,
       category: f.category.value,
       min_stage: f.min_stage.value,
-      max_investment: f.goal.value === "investment" ? parseMoney(f.max_investment.value) : null,
+      max_investment: null,
     };
     state.lastSearchGoal = body.goal;
 
@@ -850,6 +869,10 @@ function showAuthError(message) {
   $("user-name").textContent = "Не авторизован";
 }
 
+function needsOnboarding(profile) {
+  return !profile || !profile.goal || !profile.about || !String(profile.about).trim();
+}
+
 async function authorize() {
   $("tabbar").hidden = false;
 
@@ -866,6 +889,21 @@ async function authorize() {
     const name = state.user.name || `ID ${state.user.user_id}`;
     $("user-name").textContent = name;
     $("user-avatar").textContent = name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+
+    // Первичный вход: если профиль кандидата не заполнен — сразу открываем создание профиля
+    try {
+      const profile = await fetchProfile();
+      if (needsOnboarding(profile)) {
+        state.onboarding = true;
+        show("profile");
+        toast("Заполните профиль, чтобы начать работу");
+        return;
+      }
+    } catch {
+      // если профиль недоступен — всё равно пускаем дальше
+    }
+
+    state.onboarding = false;
     show("projects");
   } catch (error) {
     showAuthError(

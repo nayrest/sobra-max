@@ -22,8 +22,6 @@ const MARKET_TYPES = ["B2B", "B2C", "B2B2C"];
 const CATEGORIES = ["AI", "SaaS", "FoodTech", "FinTech", "EdTech", "E-commerce", "Другое"];
 
 const SEEKING = {
-  investment: "Инвестиции",
-  pilot: "Пилот / клиент",
   team: "Команда / co-founder",
   partner: "Партнёрство",
 };
@@ -31,8 +29,6 @@ const SEEKING = {
 // Бот сохраняет тип предложения текстом — API пишет тот же текст,
 // чтобы данные из бота и из мини-аппа не расходились.
 const OFFER_TYPES = {
-  investment: "💰 Инвестиции",
-  pilot: "🧪 Пилот / сотрудничество",
   team: "👥 Присоединиться к команде",
   partner: "🤝 Партнёрство",
 };
@@ -260,8 +256,7 @@ function createApi({ notify = {} } = {}) {
       market_type: requireOneOf(body.market_type, MARKET_TYPES, "market_type"),
       stage: requireOneOf(body.stage, STAGES, "stage"),
       seeking,
-      investment_amount:
-        seeking === SEEKING.investment ? optionalMoney(body.investment_amount, "investment_amount") : null,
+      investment_amount: null,
     };
     for (const field of REQUIRED_IDEA) data[field] = requireText(body, field);
     for (const field of OPTIONAL_IDEA) data[field] = optionalText(body, field);
@@ -340,7 +335,7 @@ function createApi({ notify = {} } = {}) {
       goal,
       category: requireOneOf(body.category, [...CATEGORIES, "Любая"], "category"),
       min_stage: requireOneOf(body.min_stage, STAGES, "min_stage"),
-      max_investment: goal === "investment" ? optionalMoney(body.max_investment, "max_investment") : null,
+      max_investment: null,
     };
 
     // «О себе» для AI Matching: из запроса, а если не передано — из профиля кандидата

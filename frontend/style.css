@@ -54,6 +54,10 @@ button { cursor: pointer; }
 
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 20px; }
 .brand b { color: #5d46ff; }
+.brand-logo {
+  width: 32px; height: 32px; border-radius: 10px;
+  object-fit: contain; display: block; flex-shrink: 0;
+}
 .brand-mark {
   width: 32px; height: 32px; border-radius: 10px;
   display: grid; place-items: center;

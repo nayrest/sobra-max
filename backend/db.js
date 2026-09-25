@@ -157,16 +157,11 @@ const stageRanks = {
 };
 
 const wantedSeeking = {
-  investment: "Инвестиции",
-  pilot: "Пилот / клиент",
   team: "Команда / co-founder",
   partner: "Партнёрство",
 };
 
-// Логика оставлена идентичной текущей (index.js, findMatches):
-// в выдачу попадают только стартапы, совпавшие по всем критериям.
-// Если захочешь показывать и частичные совпадения — убери
-// фильтр `if (matched === total)` ниже и добавь сортировку по matched.
+// Логика: в выдачу попадают только стартапы, совпавшие по всем критериям.
 async function findMatches(criteria) {
   const { rows: startups } = await pool.query(
     `SELECT * FROM startups WHERE status = 'published' ORDER BY id DESC`
@@ -194,18 +189,6 @@ async function findMatches(criteria) {
 
     if (startupRank >= minimumStage) {
       matched++;
-    }
-
-    if (criteria.goal === "investment") {
-      total++;
-
-      if (
-        startup.investment_amount &&
-        criteria.max_investment &&
-        Number(startup.investment_amount) <= Number(criteria.max_investment)
-      ) {
-        matched++;
-      }
     }
 
     if (matched === total) {
@@ -355,8 +338,6 @@ async function getContactsForCandidate(senderId) {
 // основателям находить его профиль (visible = TRUE).
 
 const SEEKING_TO_GOAL = {
-  "Инвестиции": "investment",
-  "Пилот / клиент": "pilot",
   "Команда / co-founder": "team",
   "Партнёрство": "partner",
 };

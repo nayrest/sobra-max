@@ -12,7 +12,7 @@
 <body>
   <header class="topbar">
     <div class="brand">
-      <span class="brand-mark">S</span>
+      <img src="logo.jpg" alt="SOBRA" class="brand-logo" width="32" height="32">
       <span>SOBRA <b>AI</b></span>
     </div>
     <div class="userbox"><span class="avatar" id="user-avatar">·</span><span id="user-name">Вход…</span></div>
@@ -69,11 +69,10 @@
               </select></label>
             <label class="field"><span>Кого ищете <b class="required">*</b></span>
               <select class="input" name="seeking">
-                <option value="">Выберите</option><option>Команда / co-founder</option>
-                <option>Партнёрство</option><option>Инвестиции</option><option>Пилот / клиент</option>
+                <option value="">Выберите</option>
+                <option>Команда / co-founder</option>
+                <option>Партнёрство</option>
               </select></label>
-            <label class="field wide" id="investment-field" hidden><span>Сумма инвестиций, ₽</span>
-              <input class="input" name="investment_amount" inputmode="numeric" placeholder="Например, 5 000 000"></label>
           </div>
         </div>
 
@@ -118,8 +117,6 @@
               <option value="">Выберите</option>
               <option value="team">Войти в команду</option>
               <option value="partner">Партнёрство</option>
-              <option value="investment">Инвестировать</option>
-              <option value="pilot">Пилот / стать клиентом</option>
             </select></label>
           <label class="field"><span>Сфера</span>
             <select class="input" name="category">
@@ -131,8 +128,6 @@
               <option>Идея</option><option>Прототип</option><option>MVP</option>
               <option>Первые продажи</option><option>Масштабирование</option>
             </select></label>
-          <label class="field" id="max-investment-field" hidden><span>Макс. инвестиции, ₽</span>
-            <input class="input" name="max_investment" inputmode="numeric" placeholder="3 000 000"></label>
         </div>
         <p class="ai-hint" id="search-ai-hint"></p>
         <p class="form-error" id="search-error" hidden></p>
@@ -155,8 +150,6 @@
               <option value="">Выберите</option>
               <option value="team">Войти в команду</option>
               <option value="partner">Партнёрство</option>
-              <option value="investment">Инвестировать</option>
-              <option value="pilot">Пилот / стать клиентом</option>
             </select></label>
           <label class="field"><span>Интересная сфера</span>
             <select class="input" name="category">
@@ -216,8 +209,6 @@
         <select class="input" name="type">
           <option value="team">Присоединиться к команде</option>
           <option value="partner">Партнёрство</option>
-          <option value="investment">Инвестиции</option>
-          <option value="pilot">Пилот / сотрудничество</option>
         </select></label>
       <label class="field"><span>Сообщение основателю</span>
         <textarea class="input textarea" name="message" maxlength="1000" placeholder="Коротко о себе и почему вам интересен проект"></textarea></label>

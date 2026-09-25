@@ -21,8 +21,6 @@ const RETRY_DELAY_MS = 700;
 const CACHE_TTL_MS = 60 * 60 * 1000; // повторный поиск с тем же текстом не тратит грант
 
 const GOAL_LABELS = {
-  investment: "хочет инвестировать в проект",
-  pilot: "хочет стать клиентом или провести пилот",
   team: "хочет присоединиться к команде",
   partner: "ищет партнёрство",
 };
@@ -99,9 +97,6 @@ function buildUserMessage(about, criteria, startup) {
     цель: GOAL_LABELS[criteria.goal] || criteria.goal,
     о_себе: about,
   };
-  if (criteria.goal === "investment" && criteria.max_investment) {
-    profile.готов_инвестировать_до_рублей = Number(criteria.max_investment);
-  }
 
   const project = {
     название: startup.name,
@@ -117,9 +112,6 @@ function buildUserMessage(about, criteria, startup) {
   };
   for (const key of Object.keys(project)) {
     if (project[key] === null || project[key] === undefined || project[key] === "") delete project[key];
-  }
-  if (startup.investment_amount) {
-    project.запрашиваемые_инвестиции_рублей = Number(startup.investment_amount);
   }
 
   return `Профиль человека:\n${JSON.stringify(profile, null, 2)}\n\nКарточка стартапа:\n${JSON.stringify(project, null, 2)}`;
