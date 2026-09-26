@@ -354,14 +354,83 @@ function questionField({ field, q, hint, required }) {
     <textarea class="input textarea" name="${field}" maxlength="1000" placeholder="${esc(hint)}"></textarea></label>`;
 }
 
+// ======================================================
+// ЧЕРНОВИКИ: введённое не теряется при переходе на другую вкладку или закрытии приложения.
+// Хранятся только на устройстве пользователя (localStorage), на сервер не уходят.
+// ======================================================
+
+const IDEA_FORM_FIELDS = ["name", "category", "market_type", "stage", "seeking", ...BLOCKS.map((b) => b.field), PARTNER_QUESTION.field];
+const DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1000; // черновик старше 30 дней не восстанавливаем
+
+const draftKey = (kind, id = "") => `sobra:${kind}:${state.user?.user_id || "anon"}${id ? ":" + id : ""}`;
+
+function draftSave(key, data) {
+  try {
+    const hasText = Object.values(data).some((v) => typeof v === "string" && v.trim());
+    if (hasText) localStorage.setItem(key, JSON.stringify({ data, at: Date.now() }));
+    else localStorage.removeItem(key);
+  } catch {
+    // хранилище недоступно (приватный режим и т.п.) — просто работаем без черновика
+  }
+}
+
+function draftLoad(key) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(key) || "null");
+    if (!raw || !raw.data || Date.now() - raw.at > DRAFT_TTL_MS) return null;
+    return raw.data;
+  } catch {
+    return null;
+  }
+}
+
+function draftClear(key) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    /* ignore */
+  }
+}
+
+function ideaDraftData(form) {
+  const data = {};
+  for (const name of IDEA_FORM_FIELDS) data[name] = form.elements[name].value;
+  return data;
+}
+
 function setupIdeaForm() {
   const form = $("idea-form");
   $("idea-questions").innerHTML = [...BLOCKS, { ...PARTNER_QUESTION, required: true }].map(questionField).join("");
 
+  let saveTimer = null;
+  const saveDraft = () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      draftSave(draftKey("idea-draft"), ideaDraftData(form));
+      $("idea-draft-note").hidden = !draftLoad(draftKey("idea-draft"));
+    }, 300);
+  };
+  form.addEventListener("input", saveDraft);
+  form.addEventListener("change", saveDraft);
+
   $("open-idea").addEventListener("click", () => {
-    form.reset();
     formError("idea-error", null);
+    form.reset();
+    const draft = draftLoad(draftKey("idea-draft"));
+    if (draft) {
+      for (const name of IDEA_FORM_FIELDS) if (typeof draft[name] === "string") form.elements[name].value = draft[name];
+      toast("Восстановили незаконченную проверку идеи");
+    }
+    $("idea-draft-note").hidden = !draft;
     show("idea");
+  });
+
+  $("idea-draft-clear").addEventListener("click", () => {
+    if (!confirm("Очистить все ответы в форме?")) return;
+    form.reset();
+    draftClear(draftKey("idea-draft"));
+    $("idea-draft-note").hidden = true;
+    formError("idea-error", null);
   });
 
   form.addEventListener("submit", async (event) => {
@@ -390,6 +459,9 @@ function setupIdeaForm() {
     const button = form.querySelector("button[type=submit]");
     try {
       const startup = await busy(button, "SOBRA анализирует ответы…", () => api("POST", "/api/startups", body));
+      draftClear(draftKey("idea-draft"));
+      $("idea-draft-note").hidden = true;
+      form.reset();
       toast("Карта проекта готова");
       openProject(startup.id);
     } catch (error) {
@@ -638,11 +710,23 @@ function setupTasks(s) {
     })
   );
 
-  const toggle = (id, open) => {
+  const toggle = (id, open, focus = true) => {
     box.querySelector(`[data-result-box="${id}"]`).hidden = !open;
     box.querySelector(`[data-result-open-row="${id}"]`).hidden = open;
-    if (open) box.querySelector(`[data-result-box="${id}"] textarea`).focus();
+    if (open && focus) box.querySelector(`[data-result-box="${id}"] textarea`).focus();
   };
+
+  // Черновик результата по каждой задаче: если текст уже начат — поле сразу открыто и заполнено
+  box.querySelectorAll("[data-result-box]").forEach((resultBox) => {
+    const id = resultBox.dataset.resultBox;
+    const textarea = resultBox.querySelector("textarea");
+    const draft = draftLoad(draftKey("task-draft", id));
+    if (draft && draft.result) {
+      textarea.value = draft.result;
+      toggle(id, true, false);
+    }
+    textarea.addEventListener("input", () => draftSave(draftKey("task-draft", id), { result: textarea.value }));
+  });
   box.querySelectorAll("[data-result-open]").forEach((b) => b.addEventListener("click", () => toggle(b.dataset.resultOpen, true)));
   box.querySelectorAll("[data-result-cancel]").forEach((b) => b.addEventListener("click", () => toggle(b.dataset.resultCancel, false)));
 
@@ -664,6 +748,7 @@ function setupTasks(s) {
         const { startup, update } = await busy(e.currentTarget, "SOBRA пересчитывает карту…", () =>
           api("POST", `/api/startups/${s.id}/tasks/${id}/complete`, { result })
         );
+        draftClear(draftKey("task-draft", id));
         state.lastUpdate = { ...update, projectId: startup.id };
         renderProject(startup);
         toast(update.status_after === "confirmed" ? `«${update.block_title}» подтверждён ✓` : "Карта обновлена, в плане следующий шаг");
