@@ -1702,29 +1702,6 @@ function trackContactClick(event) {
   }
 }
 
-// На ПК ссылки tel: и mailto: внутри встроенного браузера (в MAX для Windows — Edge)
-// вызывают окно браузера «Открыть приложение?». Поэтому на ПК передаём ссылку самому MAX
-// через MAX Bridge (WebApp.openLink): он открывает её средствами системы — звонок через
-// Phone Link / iPhone на macOS, письмо в почтовой программе по умолчанию.
-// На телефоне оставляем обычное поведение ссылки.
-function isDesktopClient() {
-  const platform = String((WebApp && WebApp.platform) || "").toLowerCase();
-  if (platform) return !["ios", "android"].includes(platform);
-  return window.matchMedia("(hover: hover) and (pointer: fine)").matches;
-}
-
-function openContactOnDesktop(event) {
-  const link = event.target.closest('a[href^="tel:"], a[href^="mailto:"]');
-  if (!link || !isDesktopClient()) return;
-  if (!WebApp || typeof WebApp.openLink !== "function") return; // вне MAX — обычная ссылка
-  event.preventDefault();
-  try {
-    WebApp.openLink(link.href);
-  } catch {
-    window.location.href = link.href; // MAX не принял ссылку — открываем как раньше
-  }
-}
-
 // Открывает профиль собеседника в MAX. Внутри MAX — через MAX Bridge (без выхода из приложения),
 // в обычном браузере — в новой вкладке.
 function openInMax(event) {
@@ -1883,7 +1860,6 @@ document.addEventListener("DOMContentLoaded", () => {
   for (const list of ["contacts-list", "matches-list"]) {
     $(list).addEventListener("click", trackContactClick);
     $(list).addEventListener("click", openInMax);
-    $(list).addEventListener("click", openContactOnDesktop);
   }
 
   authorize();
