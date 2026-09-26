@@ -528,3 +528,6 @@ button.contact-link { border: 0; cursor: pointer; font: inherit; font-weight: 70
   .tabbar .tab-icon { position: static; }
   .tabbar .tab-badge { top: 50%; right: 12px; transform: translateY(-50%); box-shadow: none; }
 }
+
+/* Уведомление о статистике в профиле */
+.data-note { margin: 0; font-size: 12px; line-height: 1.45; color: var(--muted); }
