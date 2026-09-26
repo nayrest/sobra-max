@@ -1602,7 +1602,7 @@ async function loadContacts() {
         ${m.founder_phone_verified ? `<div class="chips">${verifiedBadge(true)}</div>` : ""}
         ${contactLinks(m.founder_phone, m.founder_email, m.founder_max_link)}
         <p class="answer"><b>Ваш отклик.</b> ${esc(m.message)}</p>
-        <div class="card-foot">${reportButton("user", m.founder_id, m.founder_name || "основатель")} ${reportButton("startup", m.startup_id, m.startup_name)}</div>
+        <div class="card-foot">${reportButton("user", m.founder_id, `${m.founder_name || "основатель"} (проект «${m.startup_name}»)`)}</div>
       </article>`).join("");
   } catch (error) {
     failed(contactsEl, error, loadContacts);
