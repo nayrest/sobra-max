@@ -201,8 +201,8 @@ docker compose logs --tail=20 startup-discovery
 | `POSTGRES_DB` | да | Имя базы, например `startup_discovery` |
 | `POSTGRES_USER` | да | Пользователь PostgreSQL |
 | `POSTGRES_PASSWORD` | да | Пароль PostgreSQL (любой, база не публикуется наружу) |
-| `YANDEX_API_KEY` | нет | API-ключ Yandex Cloud с ролью `ai.languageModels.user`. Без него ИИ выключен, работают правила |
-| `YANDEX_FOLDER_ID` | нет | id каталога Yandex Cloud |
+| `YANDEX_API_KEY` | да, для ИИ-функций | API-ключ сервисного аккаунта Yandex Cloud с ролью `ai.languageModels.user`. Нужен для Idea Check, методики задач и AI Match. Без него приложение запускается в запасном режиме: карта по правилам, подбор без оценки ИИ |
+| `YANDEX_FOLDER_ID` | да, для ИИ-функций | id каталога Yandex Cloud, в котором создан сервисный аккаунт |
 | `API_DEBUG_AUTH` | нет | `true` — вход по `?debug_user=N` без MAX. Только для локальной отладки, по умолчанию `false` |
 | `API_TEST_TOKEN_FOUNDER` | нет | Токен тестового основателя для автоматической проверки (`openssl rand -hex 24`, не короче 24 символов) |
 | `API_TEST_TOKEN_CANDIDATE` | нет | Токен тестового кандидата |
