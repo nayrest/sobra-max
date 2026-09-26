@@ -170,6 +170,9 @@
             <input class="input" name="email" type="email" maxlength="200" placeholder="name@example.com" autocomplete="email"></label>
           <label class="field"><span>Телефон <b class="required">*</b></span>
             <input class="input" name="phone" type="tel" maxlength="18" placeholder="+7 (900) 123-45-67" inputmode="tel" autocomplete="tel"></label>
+          <label class="field"><span>Ссылка на профиль в MAX</span>
+            <input class="input" name="max_link" maxlength="300" placeholder="https://max.ru/ваш_ник" inputmode="url" autocomplete="url">
+            <small class="field-hint" id="max-link-hint">Необязательно. Нужна для кнопки «Написать в MAX» после MATCH. В MAX: профиль → QR-код → «Поделиться».</small></label>
           <label class="field"><span>Чего хотите <b class="required">*</b></span>
             <select class="input" name="goal">
               <option value="">Выберите</option>
@@ -185,7 +188,7 @@
             <textarea class="input textarea" name="about" maxlength="1500" placeholder="Опыт, навыки, сколько времени готовы уделять и какую роль хотите. Например: 4 года управлял рестораном, отвечал за персонал и поставщиков, готов уделять 30 часов в неделю"></textarea></label>
           <label class="check wide">
             <input type="checkbox" name="consent">
-            <span>Согласен(на), что мои ФИО, телефон и e-mail увидит только тот, с кем у меня случится MATCH — когда основатель примет отклик. До этого их не видит никто. <b class="required">*</b></span>
+            <span>Согласен(на), что мои ФИО, телефон, e-mail и ссылку на профиль в MAX увидит только тот, с кем у меня случится MATCH — когда основатель примет отклик. До этого их не видит никто. <b class="required">*</b></span>
           </label>
           <label class="check wide">
             <input type="checkbox" name="visible">

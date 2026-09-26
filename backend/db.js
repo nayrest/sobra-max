@@ -43,13 +43,28 @@ async function init() {
 // USERS
 // ======================================================
 
-async function ensureUser(userId, name = null) {
-  // Имя обновляем, если пришло новое: человек мог сменить его в MAX
+async function ensureUser(userId, name = null, username = null) {
+  // Имя и ник обновляем, если пришли новые: человек мог сменить их в MAX
   await pool.query(
-    `INSERT INTO users (user_id, name) VALUES ($1, $2)
-     ON CONFLICT (user_id) DO UPDATE SET name = COALESCE(EXCLUDED.name, users.name)`,
-    [userId, name]
+    `INSERT INTO users (user_id, name, username) VALUES ($1, $2, $3)
+     ON CONFLICT (user_id) DO UPDATE SET
+       name = COALESCE(EXCLUDED.name, users.name),
+       username = COALESCE(EXCLUDED.username, users.username)`,
+    [userId, name, username]
   );
+}
+
+// Ссылка на профиль в MAX, указанная вручную (null — очистить)
+async function saveMaxLink(userId, link) {
+  await pool.query(
+    `UPDATE search_profiles SET max_link = $2 WHERE user_id = $1`,
+    [userId, link]
+  );
+}
+
+async function getUsername(userId) {
+  const { rows } = await pool.query(`SELECT username FROM users WHERE user_id = $1`, [userId]);
+  return rows[0]?.username || null;
 }
 
 // ======================================================
@@ -344,6 +359,9 @@ async function getContactsForFounder(founderId) {
        CASE WHEN sp.contacts_consent_at IS NOT NULL THEN sp.phone END AS candidate_phone,
        CASE WHEN sp.contacts_consent_at IS NOT NULL THEN sp.email END AS candidate_email,
        sp.avatar_token AS candidate_avatar,
+       CASE WHEN sp.contacts_consent_at IS NOT NULL THEN
+         COALESCE(sp.max_link, CASE WHEN cu.username IS NOT NULL THEN 'https://max.ru/' || cu.username END)
+       END AS candidate_max_link,
        offers.type,
        offers.message,
        offers.created_at,
@@ -352,6 +370,7 @@ async function getContactsForFounder(founderId) {
      FROM offers
      JOIN startups ON startups.id = offers.startup_id
      LEFT JOIN search_profiles sp ON sp.user_id = offers.sender_id
+     LEFT JOIN users cu ON cu.user_id = offers.sender_id
      WHERE startups.founder_id = $1
        AND offers.status = 'accepted'
      ORDER BY offers.id DESC`,
@@ -376,7 +395,10 @@ async function getContactsForCandidate(senderId) {
        COALESCE(sp.full_name, u.name) AS founder_name,
        CASE WHEN sp.contacts_consent_at IS NOT NULL THEN sp.phone END AS founder_phone,
        CASE WHEN sp.contacts_consent_at IS NOT NULL THEN sp.email END AS founder_email,
-       sp.avatar_token AS founder_avatar
+       sp.avatar_token AS founder_avatar,
+       CASE WHEN sp.contacts_consent_at IS NOT NULL THEN
+         COALESCE(sp.max_link, CASE WHEN u.username IS NOT NULL THEN 'https://max.ru/' || u.username END)
+       END AS founder_max_link
      FROM offers
      JOIN startups ON startups.id = offers.startup_id
      LEFT JOIN search_profiles sp ON sp.user_id = startups.founder_id
@@ -588,8 +610,32 @@ async function getAvatarByToken(token) {
   return { type: rows[0].avatar_type, data: Buffer.from(rows[0].data, "base64") };
 }
 
+// ======================================================
+// ЖУРНАЛ AI MATCH (для статистики)
+// ======================================================
+
+// rows: [{ kind, startup_id, founder_id, candidate_id, score, verdict }]
+async function logAiMatches(rows) {
+  if (!rows.length) return;
+  const values = [];
+  const params = [];
+  rows.forEach((r, i) => {
+    const b = i * 6;
+    values.push(`($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6})`);
+    params.push(r.kind, r.startup_id, r.founder_id, r.candidate_id, r.score, r.verdict);
+  });
+  await pool.query(
+    `INSERT INTO ai_match_log (kind, startup_id, founder_id, candidate_id, score, verdict)
+     VALUES ${values.join(", ")}`,
+    params
+  );
+}
+
 module.exports = {
   pool,
+  logAiMatches,
+  saveMaxLink,
+  getUsername,
   TEST_USERS,
   isTestUser,
   syncTasks,

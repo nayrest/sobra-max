@@ -143,3 +143,32 @@ ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS avatar BYTEA;
 ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS avatar_type TEXT;
 ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS avatar_token TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_search_profiles_avatar_token ON search_profiles (avatar_token);
+
+-- ======================================================
+-- Журнал AI Match — для статистики
+-- ======================================================
+-- Каждая оценка ИИ «проект ↔ кандидат» (в подборе у основателя и в поиске у кандидата).
+-- Повторный показ той же пары тоже пишется: уникальные пары считаются через DISTINCT.
+
+CREATE TABLE IF NOT EXISTS ai_match_log (
+  id            SERIAL PRIMARY KEY,
+  kind          TEXT NOT NULL,              -- candidates (подбор у основателя) | search (поиск у кандидата)
+  startup_id    INTEGER NOT NULL,
+  founder_id    BIGINT NOT NULL,
+  candidate_id  BIGINT NOT NULL,
+  score         INTEGER NOT NULL,
+  verdict       TEXT NOT NULL,              -- strong | partial | weak
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_match_log_pair ON ai_match_log (startup_id, candidate_id);
+
+-- ======================================================
+-- Связь в MAX после MATCH
+-- ======================================================
+-- username — ник из подписанных данных MAX (есть, если пользователь его задал).
+-- max_link — ссылка на профиль, которую пользователь указал сам (если ника нет).
+-- Показываются только после MATCH и только при согласии на показ контактов.
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT;
+ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS max_link TEXT;

@@ -147,7 +147,11 @@ function validateInitData(initData, botToken) {
 
   const name = [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username || null;
 
-  return { userId: Number(user.id), name };
+  // Ник нужен для кнопки «Написать в MAX» после MATCH. Берём только безопасные символы.
+  const username =
+    typeof user.username === "string" && /^[A-Za-z0-9_.-]{2,64}$/.test(user.username) ? user.username : null;
+
+  return { userId: Number(user.id), name, username };
 }
 
 function avatarUrl(token) {
@@ -213,7 +217,7 @@ function authMiddleware(botToken) {
     }
 
     req.user = user;
-    await db.ensureUser(user.userId, user.name);
+    await db.ensureUser(user.userId, user.name, user.username || null);
     next();
   });
 }
@@ -282,7 +286,7 @@ function createApi({ notify = {} } = {}) {
     const user = validateInitData(req.body?.init_data, botToken);
     if (!user) throw new ApiError(401, "initData отсутствует, устарел или подпись неверна");
 
-    await db.ensureUser(user.userId, user.name);
+    await db.ensureUser(user.userId, user.name, user.username || null);
     res.json({ user_id: user.userId, name: user.name });
   }));
 
@@ -327,6 +331,15 @@ function createApi({ notify = {} } = {}) {
       created_at: task.created_at,
       done_at: task.done_at,
     };
+  }
+
+  // Статистика не должна ломать ответ пользователю
+  async function logAiMatches(rows) {
+    try {
+      await db.logAiMatches(rows);
+    } catch (error) {
+      console.error("❌ Журнал AI Match:", error.message);
+    }
   }
 
   // Проект вместе с Action Plan. Если задач ещё нет (проект создан до появления
@@ -510,6 +523,18 @@ function createApi({ notify = {} } = {}) {
 
     // ИИ оценивает только то, что прошло фильтры. При сбое ИИ поиск всё равно отвечает.
     const { matches, ai } = await aiMatching.enrichMatches(about, criteria, found);
+    await logAiMatches(
+      matches
+        .filter((m) => m.ai && Number.isFinite(m.ai.score))
+        .map((m) => ({
+          kind: "search",
+          startup_id: m.startup.id,
+          founder_id: m.startup.founder_id,
+          candidate_id: req.user.userId,
+          score: Math.round(m.ai.score),
+          verdict: m.ai.verdict,
+        }))
+    );
     res.json({ matches, ai });
   }));
 
@@ -534,6 +559,22 @@ function createApi({ notify = {} } = {}) {
     return `+7${digits}`;
   }
 
+  // Ссылка на профиль в MAX: https://max.ru/... или max.me/... (схему можно не писать).
+  // Пустая строка — очистить. Возвращает undefined, если поле не передано.
+  function parseMaxLink(raw) {
+    if (raw === undefined) return undefined;
+    if (raw === null) return null;
+    if (typeof raw !== "string") throw new ApiError(400, "Ссылка на профиль MAX должна быть строкой");
+    let link = raw.trim();
+    if (!link) return null;
+    if (!/^https?:\/\//i.test(link)) link = "https://" + link;
+    link = link.replace(/^http:\/\//i, "https://");
+    if (link.length > 300 || !/^https:\/\/(www\.)?(max\.ru|max\.me)\/[A-Za-z0-9_.\-\/?=&%#+~]+$/i.test(link)) {
+      throw new ApiError(400, "Укажите ссылку на профиль MAX вида https://max.ru/…");
+    }
+    return link;
+  }
+
   app.get("/api/profile", wrap(async (req, res) => {
     const profile = await db.getSearchProfile(req.user.userId);
     res.json({
@@ -550,6 +591,8 @@ function createApi({ notify = {} } = {}) {
       visible: Boolean(profile?.visible),
       consent: Boolean(profile?.contacts_consent_at),
       avatar_url: avatarUrl(profile?.avatar_token),
+      max_link: profile?.max_link || "",
+      max_username: req.user.username || (await db.getUsername(req.user.userId)),
     });
   }));
 
@@ -581,6 +624,7 @@ function createApi({ notify = {} } = {}) {
       throw new ApiError(400, "Подтвердите согласие на показ контактов после MATCH");
     }
     const fullName = [lastName, firstName, patronymic].filter(Boolean).join(" ");
+    const maxLink = parseMaxLink(body.max_link);
 
     await db.saveSearchProfile(req.user.userId, {
       goal,
@@ -597,6 +641,7 @@ function createApi({ notify = {} } = {}) {
       phone,
     });
     await db.saveContactsConsent(req.user.userId);
+    if (maxLink !== undefined) await db.saveMaxLink(req.user.userId, maxLink);
 
     res.json({
       name: req.user.name,
@@ -612,6 +657,8 @@ function createApi({ notify = {} } = {}) {
       visible,
       consent: true,
       avatar_url: avatarUrl(current?.avatar_token),
+      max_link: maxLink === undefined ? current?.max_link || "" : maxLink || "",
+      max_username: req.user.username || (await db.getUsername(req.user.userId)),
     });
   }));
 
@@ -662,6 +709,18 @@ function createApi({ notify = {} } = {}) {
     const startup = await getOwnPublishedStartup(req);
     const found = await db.getCandidatesForStartup(startup);
     const { candidates, ai } = await aiMatching.rankCandidates(startup, found);
+    await logAiMatches(
+      candidates
+        .filter((c) => c.ai && Number.isFinite(c.ai.score))
+        .map((c) => ({
+          kind: "candidates",
+          startup_id: startup.id,
+          founder_id: startup.founder_id,
+          candidate_id: c.user_id,
+          score: Math.round(c.ai.score),
+          verdict: c.ai.verdict,
+        }))
+    );
     const invited = new Set(await db.getInvitedUserIds(startup.id));
 
     res.json({

@@ -1043,6 +1043,10 @@ async function loadProfile() {
     form.elements.about.value = p.about || "";
     form.elements.visible.checked = p.visible;
     form.elements.consent.checked = Boolean(p.consent);
+    form.elements.max_link.value = p.max_link || "";
+    $("max-link-hint").textContent = p.max_username
+      ? `Необязательно: у вас в MAX есть ник @${p.max_username}, ссылка https://max.ru/${p.max_username} подставится сама. Заполните, только если хотите указать другую.`
+      : "Необязательно. Нужна для кнопки «Написать в MAX» после MATCH. В MAX: профиль → QR-код → «Поделиться».";
     updateUserbox(p);
   } catch (error) {
     formError("profile-error", error);
@@ -1089,6 +1093,12 @@ function setupProfileForm() {
       formError("profile-error", new Error("Расскажите о себе хотя бы в паре предложений — по этому тексту ИИ подбирает проекты."));
       return;
     }
+    const maxLink = f.max_link.value.trim();
+    if (maxLink && !/^(https?:\/\/)?(www\.)?(max\.ru|max\.me)\/\S+$/i.test(maxLink)) {
+      f.max_link.focus();
+      formError("profile-error", new Error("Ссылка на профиль MAX должна начинаться с https://max.ru/ — скопируйте её в MAX: профиль → QR-код → «Поделиться»."));
+      return;
+    }
     if (!f.consent.checked) {
       f.consent.focus();
       formError("profile-error", new Error("Отметьте согласие: без него контакты нельзя передать после MATCH."));
@@ -1107,6 +1117,7 @@ function setupProfileForm() {
           goal: f.goal.value,
           category: f.category.value,
           about: f.about.value.trim(),
+          max_link: maxLink,
           visible: f.visible.checked,
           consent: true,
         })
@@ -1337,12 +1348,33 @@ async function handleDecision(event) {
 // ======================================================
 
 // Телефон и e-mail приходят с сервера только после MATCH и только при согласии человека
-function contactLinks(phone, email) {
+function contactLinks(phone, email, maxLink) {
   const links = [];
+  if (maxLink) links.push(`<button class="contact-link max" type="button" data-max-link="${esc(maxLink)}">💬 Написать в MAX</button>`);
   if (phone) links.push(`<a class="contact-link" href="tel:${esc(phone)}">📞 ${esc(formatRuPhone(phone))}</a>`);
   if (email) links.push(`<a class="contact-link" href="mailto:${esc(email)}">✉️ ${esc(email)}</a>`);
   if (links.length === 0) return `<p class="muted">Контакты пока не указаны в профиле.</p>`;
   return `<div class="contact-links">${links.join("")}</div>`;
+}
+
+// Открывает профиль собеседника в MAX. Внутри MAX — через MAX Bridge (без выхода из приложения),
+// в обычном браузере — в новой вкладке.
+function openInMax(event) {
+  const button = event.target.closest("[data-max-link]");
+  if (!button) return;
+  const url = button.dataset.maxLink;
+  if (!/^https:\/\/(www\.)?(max\.ru|max\.me)\//i.test(url)) return;
+  try {
+    if (WebApp && typeof WebApp.openMaxLink === "function" && /^https:\/\/(www\.)?max\.ru\//i.test(url)) {
+      WebApp.openMaxLink(url);
+    } else if (WebApp && typeof WebApp.openLink === "function") {
+      WebApp.openLink(url);
+    } else {
+      window.open(url, "_blank", "noopener");
+    }
+  } catch {
+    window.open(url, "_blank", "noopener");
+  }
 }
 
 async function loadContacts() {
@@ -1360,7 +1392,7 @@ async function loadContacts() {
         <div class="person">${avatarHtml(c.candidate_avatar_url, c.candidate_name)}
           <div class="grow"><h3>${esc(c.candidate_name || "Пользователь MAX")}</h3>
           <p class="muted">Проект: ${esc(c.startup_name)} · ${dateText(c.created_at)}</p></div></div>
-        ${contactLinks(c.candidate_phone, c.candidate_email)}
+        ${contactLinks(c.candidate_phone, c.candidate_email, c.candidate_max_link)}
         <p class="answer">${esc(c.message)}</p>
       </article>`).join("");
 
@@ -1370,7 +1402,7 @@ async function loadContacts() {
         <h3>${esc(m.startup_name)}</h3>
         <div class="person small">${avatarHtml(m.founder_avatar_url, m.founder_name)}
           <p class="muted">Основатель: ${esc(m.founder_name || "пользователь MAX")} · ${dateText(m.created_at)}</p></div>
-        ${contactLinks(m.founder_phone, m.founder_email)}
+        ${contactLinks(m.founder_phone, m.founder_email, m.founder_max_link)}
         <p class="answer"><b>Ваш отклик.</b> ${esc(m.message)}</p>
       </article>`).join("");
   } catch (error) {
@@ -1473,6 +1505,8 @@ document.addEventListener("DOMContentLoaded", () => {
   $("offers-list").addEventListener("click", handleDecision);
   $("invites-list").addEventListener("click", respondClick);
   $("auth-retry").addEventListener("click", authorize);
+  $("contacts-list").addEventListener("click", openInMax);
+  $("matches-list").addEventListener("click", openInMax);
 
   authorize();
 });

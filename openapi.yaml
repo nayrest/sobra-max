@@ -9,7 +9,8 @@ info:
     SOBRA помогает основателю проверить бизнес-идею и найти партнёра или co-founder'а:
     **Idea Check → Project Map → Action Plan → Update → AI Match**.
     Кандидат заполняет профиль, ищет проекты и откликается. Принятый отклик — MATCH:
-    стороны видят телефон и e-mail друг друга (только при согласии на показ контактов).
+    стороны видят телефон, e-mail и ссылку для перехода в чат MAX друг с другом
+    (только при согласии на показ контактов).
 
     ## Авторизация
     - **Мини-приложение в MAX**: `Authorization: Bearer <initData>`. Подпись initData проверяется
@@ -753,7 +754,12 @@ components:
         consent:
           type: boolean
           enum: [true]
-          description: Согласие показать ФИО, телефон и e-mail тому, с кем случится MATCH
+          description: Согласие показать ФИО, телефон, e-mail и ссылку на профиль MAX тому, с кем случится MATCH
+        max_link:
+          type: string
+          maxLength: 300
+          example: https://max.ru/ivan_petrov
+          description: Ссылка на профиль в MAX (https://max.ru/… или max.me/…). Необязательно — если у пользователя есть ник в MAX, ссылка строится из него. Пустая строка очищает поле
 
     Profile:
       type: object
@@ -772,6 +778,8 @@ components:
         visible: { type: boolean }
         consent: { type: boolean }
         avatar_url: { type: string, nullable: true, example: /api/avatars/40325a61471224918d3c7bffa2508c3c }
+        max_link: { type: string, description: Ссылка на профиль MAX, указанная вручную (пустая строка — не указана) }
+        max_username: { type: string, nullable: true, description: Ник пользователя в MAX из подписанных данных }
 
     # ---------- проекты ----------
 
@@ -973,6 +981,7 @@ components:
         candidate_phone: { type: string, nullable: true }
         candidate_email: { type: string, nullable: true }
         candidate_avatar_url: { type: string, nullable: true }
+        candidate_max_link: { type: string, nullable: true, description: Ссылка для кнопки «Написать в MAX» (только при согласии) }
         type: { type: string }
         message: { type: string }
         created_at: { type: string, format: date-time }
@@ -994,3 +1003,4 @@ components:
         founder_phone: { type: string, nullable: true }
         founder_email: { type: string, nullable: true }
         founder_avatar_url: { type: string, nullable: true }
+        founder_max_link: { type: string, nullable: true, description: Ссылка для кнопки «Написать в MAX» (только при согласии) }
