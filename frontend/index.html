@@ -11,11 +11,14 @@
 </head>
 <body>
   <header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Меню" aria-controls="tabbar" aria-expanded="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
     <div class="brand">
       <img src="logo.png" alt="SOBRA" class="brand-logo" width="32" height="32">
       <span>SOBRA <b>AI</b></span>
     </div>
-    <div class="userbox"><span class="avatar" id="user-avatar">·</span><span id="user-name">Вход…</span></div>
+    <div class="userbox"><span class="avatar" id="user-avatar" aria-hidden="true">·</span><span id="user-name">Вход…</span></div>
   </header>
 
   <main class="content" id="content">
@@ -143,6 +146,20 @@
       </div>
       <form id="profile-form" class="card" novalidate>
         <div class="form-grid">
+          <div class="avatar-edit wide">
+            <span class="avatar xl" id="profile-avatar" aria-hidden="true">·</span>
+            <div class="grow">
+              <b>Фото профиля</b>
+              <p class="muted">Его видят основатели в подборе кандидатов и люди, с которыми у вас MATCH. Можно без фото.</p>
+              <div class="avatar-actions">
+                <label class="btn secondary small file-btn">
+                  <span id="avatar-label">Загрузить фото</span>
+                  <input class="visually-hidden" type="file" id="avatar-input" accept="image/*">
+                </label>
+                <button class="btn danger small" type="button" id="avatar-remove" hidden>Удалить фото</button>
+              </div>
+            </div>
+          </div>
           <label class="field"><span>Фамилия <b class="required">*</b></span>
             <input class="input" name="last_name" maxlength="80" placeholder="Иванов" autocomplete="family-name"></label>
           <label class="field"><span>Имя <b class="required">*</b></span>
@@ -199,7 +216,9 @@
     </section>
   </main>
 
-  <nav class="tabbar" id="tabbar">
+  <div class="nav-backdrop" id="nav-backdrop" hidden></div>
+  <nav class="tabbar" id="tabbar" aria-label="Разделы">
+    <p class="nav-title">Меню</p>
     <button type="button" data-tab="projects" class="active">
       <svg viewBox="0 0 24 24"><path d="M3 7h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Проекты</span></button>
     <button type="button" data-tab="search">
@@ -210,6 +229,16 @@
       <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0M17 11a3 3 0 1 0 0-6M21 20a6 6 0 0 0-4-5.6"/></svg><span>Контакты</span></button>
     <button type="button" data-tab="profile">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span>Профиль</span></button>
+    <div class="nav-cycle">
+      <p class="nav-title">Как работает SOBRA</p>
+      <ol>
+        <li><b>Idea Check</b> — ответы на вопросы</li>
+        <li><b>Project Map</b> — что проверено, что нет</li>
+        <li><b>Action Plan</b> — следующий шаг</li>
+        <li><b>Update</b> — результат двигает карту</li>
+        <li><b>AI Match</b> — человек с нужными навыками</li>
+      </ol>
+    </div>
   </nav>
 
   <!-- Панель отклика -->

@@ -102,3 +102,44 @@ CREATE TABLE IF NOT EXISTS invites (
 );
 
 CREATE INDEX IF NOT EXISTS idx_invites_user ON invites (user_id);
+
+-- ======================================================
+-- Action Plan и Update: задачи по непроработанным блокам карты
+-- ======================================================
+-- Для каждого блока, который ещё не подтверждён, есть одна открытая задача.
+-- Основатель выполняет её и возвращается с результатом (Update):
+-- результат дописывается в блок, карта пересчитывается, задача закрывается
+-- с отметкой «было → стало». Если блок всё ещё не подтверждён,
+-- появляется следующая задача по нему — так замыкается цикл.
+
+CREATE TABLE IF NOT EXISTS action_tasks (
+  id                SERIAL PRIMARY KEY,
+  startup_id        INTEGER NOT NULL REFERENCES startups (id) ON DELETE CASCADE,
+  block_id          TEXT NOT NULL,
+  title             TEXT NOT NULL,
+  method            JSONB,                         -- шаги методики: ["...", "..."]
+  method_source     TEXT NOT NULL DEFAULT 'template', -- template | ai
+  status            TEXT NOT NULL DEFAULT 'open',  -- open | done
+  result            TEXT,                          -- что основатель узнал / сделал
+  status_before     TEXT,                          -- статус блока до обновления
+  status_after      TEXT,                          -- статус блока после пересчёта
+  readiness_before  INTEGER,
+  readiness_after   INTEGER,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  done_at           TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_action_tasks_startup ON action_tasks (startup_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_action_tasks_open ON action_tasks (startup_id, block_id) WHERE status = 'open';
+
+-- ======================================================
+-- Аватарка профиля
+-- ======================================================
+-- Картинка хранится в БД (после сжатия в браузере — около 20–40 КБ).
+-- Отдаётся по случайному токену: /api/avatars/<token>. Токен меняется
+-- при каждой загрузке, поэтому кэш браузера не показывает старое фото.
+
+ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS avatar BYTEA;
+ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS avatar_type TEXT;
+ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS avatar_token TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_search_profiles_avatar_token ON search_profiles (avatar_token);

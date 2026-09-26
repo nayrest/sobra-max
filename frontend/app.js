@@ -1,6 +1,6 @@
 // SOBRA AI — мини-приложение MAX.
 // Две роли в одном приложении:
-//   основатель: проверка идеи → карта проекта → ИИ-подбор партнёра → приглашение;
+//   основатель: Idea Check → Project Map → Action Plan → Update (цикл) → AI Match → приглашение;
 //   кандидат:   профиль → поиск проектов с оценкой ИИ → отклик.
 // Отклик, принятый основателем, — это MATCH: оба видят друг друга в «Контактах».
 
@@ -69,9 +69,9 @@ const PARTNER_QUESTION = {
 };
 
 const STATUS = {
-  confirmed: { text: "Подтверждено", tone: "green" },
-  hypothesis: { text: "Гипотеза", tone: "amber" },
-  missing: { text: "Не проработано", tone: "red" },
+  confirmed: { text: "Подтверждено", tone: "green", icon: "✓" },
+  hypothesis: { text: "Гипотеза", tone: "amber", icon: "~" },
+  missing: { text: "Не проработано", tone: "red", icon: "✗" },
 };
 
 const GOALS = {
@@ -101,6 +101,7 @@ const state = {
   currentProjectId: null,
   offerStartupId: null,
   lastSearchGoal: null,
+  lastUpdate: null, // результат последнего шага Update: показываем баннер «было → стало»
 };
 
 // ======================================================
@@ -117,6 +118,24 @@ function esc(value) {
 }
 
 const badge = (text, tone = "blue") => `<span class="badge ${tone}">${esc(text)}</span>`;
+
+function initialsOf(name) {
+  return (
+    String(name || "")
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((w) => w[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() || "·"
+  );
+}
+
+// Кружок с фото или инициалами
+function avatarHtml(url, name, extra = "") {
+  const inner = url ? `<img src="${esc(url)}" alt="" loading="lazy">` : esc(initialsOf(name));
+  return `<span class="avatar ${extra}" aria-hidden="true">${inner}</span>`;
+}
 
 function money(value) {
   return value ? Number(value).toLocaleString("ru-RU") + " ₽" : "";
@@ -197,7 +216,31 @@ const VIEW_LOAD = {
   profile: loadProfile,
 };
 
+// ПК: меню сбоку. От 1200px оно закреплено открытым, от 900 до 1199 — выезжает (off-canvas).
+const desktopMq = window.matchMedia("(min-width: 900px)");
+const dockMq = window.matchMedia("(min-width: 1200px)");
+
+function setNav(open) {
+  const isOpen = Boolean(open && desktopMq.matches);
+  document.body.classList.toggle("nav-open", isOpen);
+  $("menu-toggle").setAttribute("aria-expanded", String(isOpen));
+  $("nav-backdrop").hidden = !(isOpen && !dockMq.matches);
+}
+
+function setupSideMenu() {
+  $("menu-toggle").addEventListener("click", () => setNav(!document.body.classList.contains("nav-open")));
+  $("nav-backdrop").addEventListener("click", () => setNav(false));
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !dockMq.matches) setNav(false);
+  });
+  const reset = () => setNav(dockMq.matches);
+  dockMq.addEventListener("change", reset);
+  desktopMq.addEventListener("change", reset);
+  reset();
+}
+
 function show(view) {
+  if (!dockMq.matches) setNav(false);
   document.querySelectorAll(".view").forEach((v) => (v.hidden = true));
   $(`view-${view}`).hidden = false;
 
@@ -273,7 +316,9 @@ async function loadProjects() {
       empty(list, "Проектов пока нет. Пройдите проверку идеи — SOBRA покажет, что уже проработано, и поможет найти партнёра.");
       return;
     }
-    list.innerHTML = startups.map((s) => `
+    list.innerHTML = startups.map((s) => {
+      const total = (s.tasks_open || 0) + (s.tasks_done || 0);
+      return `
       <article class="card project-card" data-open="${s.id}">
         <div class="project-row">
           <span class="project-icon">${CATEGORY_ICON[s.category] || "💡"}</span>
@@ -286,8 +331,10 @@ async function loadProjects() {
           </div>
         </div>
         ${s.readiness !== null && s.readiness !== undefined ? readinessBar(s.readiness) : ""}
+        ${total ? `<p class="muted plan-mini">План действий: выполнено ${s.tasks_done || 0}, осталось ${s.tasks_open || 0}</p>` : ""}
         <div class="actions"><button class="btn secondary small" type="button" data-open="${s.id}">Открыть карту проекта →</button></div>
-      </article>`).join("");
+      </article>`;
+    }).join("");
   } catch (error) {
     failed(list, error, loadProjects);
   }
@@ -365,18 +412,128 @@ async function loadProject(id) {
   }
 }
 
+// Пять шагов SOBRA. 3 и 4 — цикл: план → результат → пересчёт карты → новый план.
+function journey(s, openTasks, doneTasks) {
+  const published = s.status === "published";
+  const updates = doneTasks.filter((t) => t.result).length;
+  const steps = [
+    { n: "01", title: "Idea Check", text: "Ответы на вопросы", state: "done", target: null },
+    { n: "02", title: "Project Map", text: `Готовность ${Number(s.readiness) || 0}%`, state: "done", target: "project-map" },
+    {
+      n: "03", title: "Action Plan",
+      text: openTasks.length ? `Шагов в плане: ${openTasks.length}` : "Все блоки подтверждены",
+      state: openTasks.length ? "active" : "done", target: "action-plan",
+    },
+    {
+      n: "04", title: "Update",
+      text: updates ? `Обновлений: ${updates}` : "Вернитесь с результатом",
+      state: updates ? "done" : "todo", target: updates ? "updates" : "action-plan",
+    },
+    {
+      n: "05", title: "AI Match",
+      text: published ? "Подобрать партнёра" : "Сначала опубликуйте",
+      state: published ? "active" : "todo", target: "match-card",
+    },
+  ];
+  return `<nav class="journey" aria-label="Шаги SOBRA">
+    ${steps.map((st) => `<button type="button" class="journey-step ${st.state}" ${st.target ? `data-scroll="${st.target}"` : "disabled"}>
+      <span class="journey-num">${st.state === "done" ? "✓" : st.n}</span>
+      <span class="journey-text"><b>${st.title}</b><small>${esc(st.text)}</small></span>
+    </button>`).join("")}
+  </nav>`;
+}
+
+function statusPill(status) {
+  const st = STATUS[status] || STATUS.missing;
+  return `<span class="badge ${st.tone}">${st.icon} ${esc(st.text)}</span>`;
+}
+
+// Баннер после шага Update: что изменилось в карте
+function updateBanner(s) {
+  const u = state.lastUpdate;
+  if (!u || u.projectId !== s.id) return "";
+  const confirmed = u.status_after === "confirmed";
+  const delta = (u.readiness_after || 0) - (u.readiness_before || 0);
+  return `<section class="card update-banner ${confirmed ? "ok" : ""}" id="update-banner">
+    <p class="eyebrow">Update · карта пересчитана</p>
+    <h3>${esc(u.block_title)}</h3>
+    <div class="transition">${statusPill(u.status_before)} <span class="arrow">→</span> ${statusPill(u.status_after)}</div>
+    <p class="muted">Готовность: ${u.readiness_before}% → <b>${u.readiness_after}%</b>${delta > 0 ? ` (+${delta})` : ""}</p>
+    ${confirmed
+      ? `<p class="answer">Блок подтверждён фактами. Он больше не в плане.</p>`
+      : `<p class="answer">Пока не хватает фактов, чтобы засчитать блок. SOBRA добавила следующий шаг в план.${u.comment ? ` <b>Совет:</b> ${esc(u.comment)}` : ""}</p>`}
+  </section>`;
+}
+
+function taskCard(t, map) {
+  const comment = map[t.block_id]?.comment;
+  return `<article class="task" id="task-${t.id}">
+    <div class="task-head">
+      <span class="task-box" aria-hidden="true"></span>
+      <div class="grow">
+        <h3>${esc(t.title)}</h3>
+        <div class="chips">${badge(t.block_title, "gray")} ${statusPill(map[t.block_id]?.status)}</div>
+      </div>
+    </div>
+    ${comment ? `<p class="next"><b>Что дальше:</b> ${esc(comment)}</p>` : ""}
+    <details class="method" ${t.method_source === "ai" ? "open" : ""}>
+      <summary>${t.method_source === "ai" ? "✨ Методика от ИИ под ваш проект" : "Как это сделать"}</summary>
+      <ol>${t.method.map((m) => `<li>${esc(m)}</li>`).join("")}</ol>
+      ${t.method_source === "ai" ? "" : `<button class="text-btn" type="button" data-method="${t.id}">✨ Попросить ИИ расписать под мой проект</button>`}
+    </details>
+    <div class="task-result" data-result-box="${t.id}" hidden>
+      <label class="field"><span>Что сделали и что узнали?</span>
+        <textarea class="input textarea" maxlength="1000" placeholder="${esc(t.result_hint)}"></textarea></label>
+      <p class="hint">Цифры и факты (интервью, заявки, продажи) помогут засчитать блок как подтверждённый.</p>
+      <p class="form-error" hidden></p>
+      <div class="actions">
+        <button class="btn secondary small" type="button" data-result-cancel="${t.id}">Отмена</button>
+        <button class="btn primary small" type="button" data-result-save="${t.id}">Обновить карту</button>
+      </div>
+    </div>
+    <div class="actions" data-result-open-row="${t.id}">
+      <button class="btn primary small" type="button" data-result-open="${t.id}">Внести результат →</button>
+    </div>
+  </article>`;
+}
+
+function historyItem(t) {
+  const date = dateText(t.done_at);
+  if (!t.result) {
+    return `<li class="history-item">
+      <span class="history-icon ok">✓</span>
+      <div class="grow"><b>${esc(t.block_title)}</b> — подтверждён при редактировании блока <span class="muted">· ${date}</span></div>
+    </li>`;
+  }
+  return `<li class="history-item">
+    <span class="history-icon ${t.status_after === "confirmed" ? "ok" : ""}">${t.status_after === "confirmed" ? "✓" : "↻"}</span>
+    <div class="grow">
+      <b>${esc(t.title)}</b> <span class="muted">· ${date}</span>
+      <div class="transition small">${statusPill(t.status_before)} <span class="arrow">→</span> ${statusPill(t.status_after)}
+        ${t.readiness_after !== null && t.readiness_after !== undefined ? `<span class="muted">${t.readiness_before}% → ${t.readiness_after}%</span>` : ""}</div>
+      <p class="answer">${esc(t.result)}</p>
+    </div>
+  </li>`;
+}
+
 function renderProject(s) {
   const map = s.idea_map || {};
   const published = s.status === "published";
-  const nextSteps = BLOCKS.filter((b) => map[b.id] && map[b.id].status !== "confirmed").slice(0, 3);
+  const tasks = s.tasks || [];
+  const openTasks = tasks.filter((t) => t.status === "open");
+  const doneTasks = tasks.filter((t) => t.status === "done");
+  const missingTitles = BLOCKS.filter((b) => map[b.id] && map[b.id].status !== "confirmed").map((b) => b.title.toLowerCase());
 
   $("project-detail").innerHTML = `
     <div class="page-head">
       <h1>Карта проекта</h1>
-      <p>Что уже подтверждено, где есть пробелы и какого партнёра не хватает.</p>
+      <p>SOBRA не оценивает, хорошая ли идея. Она показывает, что нужно проверить, фиксирует прогресс и помогает найти человека с недостающими компетенциями.</p>
     </div>
 
-    <section class="card">
+    ${journey(s, openTasks, doneTasks)}
+    ${updateBanner(s)}
+
+    <section class="card" id="project-map">
       <div class="project-row">
         <span class="project-icon big">${CATEGORY_ICON[s.category] || "💡"}</span>
         <div class="grow">
@@ -391,10 +548,35 @@ function renderProject(s) {
       ${map._source === "rules" ? `<p class="ai-note">ИИ был недоступен, карта построена по простым правилам. Обновите любой блок, чтобы пересчитать.</p>` : ""}
     </section>
 
-    <section class="card insight">
-      <p class="eyebrow">Кого ищем</p>
+    <div class="map-grid">
+      ${BLOCKS.map((b) => mapCard(b, s, map[b.id])).join("")}
+    </div>
+
+    <section class="card plan" id="action-plan">
+      <div class="plan-head">
+        <div>
+          <p class="eyebrow">Шаг 3 · Action Plan</p>
+          <h2>Следующие шаги</h2>
+        </div>
+        ${tasks.length ? `<span class="plan-count">${doneTasks.length} / ${tasks.length}</span>` : ""}
+      </div>
+      ${openTasks.length
+        ? `<p class="muted">Выполните шаг и вернитесь с результатом — SOBRA пересчитает карту (шаг 4 · Update).</p>
+           <div class="tasks">${openTasks.map((t) => taskCard(t, map)).join("")}</div>`
+        : `<p class="answer">Все блоки карты подтверждены фактами. Если что-то изменится — обновите блок, и план пересоберётся.</p>`}
+    </section>
+
+    ${doneTasks.length ? `<section class="card" id="updates">
+      <p class="eyebrow">Шаг 4 · Update</p>
+      <h2>История обновлений</h2>
+      <ul class="history">${doneTasks.map(historyItem).join("")}</ul>
+    </section>` : ""}
+
+    <section class="card insight" id="match-card">
+      <p class="eyebrow">Шаг 5 · AI Match</p>
       <h3>${esc(seekingText(s))}</h3>
       <p>${esc(s.partner_needed || "Не указано")}</p>
+      ${missingTitles.length ? `<p class="muted">Проекту пока не хватает: ${esc(missingTitles.slice(0, 3).join(", "))}. Партнёр с опытом в этом ускорит проверку.</p>` : ""}
       ${published
         ? `<button class="btn primary block" type="button" id="go-match">Подобрать партнёра →</button>`
         : `<p class="muted">Опубликуйте проект, чтобы кандидаты могли откликаться, а ИИ — подбирать людей.</p>
@@ -403,19 +585,14 @@ function renderProject(s) {
              <button class="btn primary" type="button" id="publish-project">Опубликовать</button>
            </div>`}
     </section>
-
-    <div class="map-grid">
-      ${BLOCKS.map((b) => mapCard(b, s, map[b.id])).join("")}
-    </div>
-
-    ${nextSteps.length ? `<section class="card">
-      <h2>Следующие шаги</h2>
-      <ol class="steps">${nextSteps.map((b) => `<li><b>${esc(b.title)}.</b> ${esc(map[b.id].comment)}</li>`).join("")}</ol>
-    </section>` : ""}
   `;
 
   const box = $("project-detail");
   box.querySelectorAll("[data-edit]").forEach((btn) => btn.addEventListener("click", () => editBlock(s, btn.dataset.edit)));
+  box.querySelectorAll("[data-scroll]").forEach((btn) =>
+    btn.addEventListener("click", () => $(btn.dataset.scroll)?.scrollIntoView({ behavior: "smooth", block: "start" }))
+  );
+  setupTasks(s);
 
   if (published) {
     $("go-match").addEventListener("click", () => show("match"));
@@ -442,13 +619,69 @@ function renderProject(s) {
   }
 }
 
+// Action Plan: методика от ИИ и шаг Update
+function setupTasks(s) {
+  const box = $("project-detail");
+
+  box.querySelectorAll("[data-method]").forEach((btn) =>
+    btn.addEventListener("click", async (e) => {
+      const button = e.currentTarget;
+      try {
+        const { ai } = await busy(button, "ИИ составляет методику…", () =>
+          api("POST", `/api/startups/${s.id}/tasks/${button.dataset.method}/method`)
+        );
+        if (!ai) toast("ИИ сейчас недоступен — оставили базовую методику", "error");
+        loadProject(s.id);
+      } catch (error) {
+        toast(error.message, "error");
+      }
+    })
+  );
+
+  const toggle = (id, open) => {
+    box.querySelector(`[data-result-box="${id}"]`).hidden = !open;
+    box.querySelector(`[data-result-open-row="${id}"]`).hidden = open;
+    if (open) box.querySelector(`[data-result-box="${id}"] textarea`).focus();
+  };
+  box.querySelectorAll("[data-result-open]").forEach((b) => b.addEventListener("click", () => toggle(b.dataset.resultOpen, true)));
+  box.querySelectorAll("[data-result-cancel]").forEach((b) => b.addEventListener("click", () => toggle(b.dataset.resultCancel, false)));
+
+  box.querySelectorAll("[data-result-save]").forEach((b) =>
+    b.addEventListener("click", async (e) => {
+      const id = b.dataset.resultSave;
+      const resultBox = box.querySelector(`[data-result-box="${id}"]`);
+      const textarea = resultBox.querySelector("textarea");
+      const error = resultBox.querySelector(".form-error");
+      const result = textarea.value.trim();
+      error.hidden = true;
+      if (result.length < 10) {
+        error.hidden = false;
+        error.textContent = "Опишите результат хотя бы одним предложением.";
+        textarea.focus();
+        return;
+      }
+      try {
+        const { startup, update } = await busy(e.currentTarget, "SOBRA пересчитывает карту…", () =>
+          api("POST", `/api/startups/${s.id}/tasks/${id}/complete`, { result })
+        );
+        state.lastUpdate = { ...update, projectId: startup.id };
+        renderProject(startup);
+        toast(update.status_after === "confirmed" ? `«${update.block_title}» подтверждён ✓` : "Карта обновлена, в плане следующий шаг");
+        $("update-banner")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      } catch (err) {
+        error.hidden = false;
+        error.textContent = err.message;
+      }
+    })
+  );
+}
+
 function mapCard(block, startup, item) {
   const status = STATUS[item?.status] || STATUS.missing;
   const answer = startup[block.field];
-  return `<article class="card map-card" id="block-${block.id}">
-    <div class="map-head"><h3>${esc(block.title)}</h3>${badge(status.text, status.tone)}</div>
+  return `<article class="card map-card ${item?.status || "missing"}" id="block-${block.id}">
+    <div class="map-head"><h3><span class="map-icon">${status.icon}</span> ${esc(block.title)}</h3>${badge(status.text, status.tone)}</div>
     <p class="answer">${answer ? esc(answer) : '<span class="muted">Нет ответа</span>'}</p>
-    ${item?.comment ? `<p class="next"><b>Что дальше:</b> ${esc(item.comment)}</p>` : ""}
     <button class="text-btn" type="button" data-edit="${block.id}">Обновить блок →</button>
   </article>`;
 }
@@ -460,7 +693,7 @@ function editBlock(startup, blockId) {
   card.innerHTML = `
     <div class="map-head"><h3>${esc(block.title)}</h3></div>
     <label class="field"><span>${esc(block.q)}</span>
-      <textarea class="input textarea" maxlength="1000" placeholder="${esc(block.hint)}">${esc(startup[block.field] || "")}</textarea></label>
+      <textarea class="input textarea" maxlength="3000" placeholder="${esc(block.hint)}">${esc(startup[block.field] || "")}</textarea></label>
     <p class="form-error" hidden></p>
     <div class="actions">
       <button class="btn secondary small" type="button" data-cancel>Отмена</button>
@@ -508,7 +741,7 @@ async function loadCandidates(id) {
     list.innerHTML = aiNotice(ai, "") + candidates.map((c) => `
       <article class="card">
         <div class="person">
-          <span class="avatar">${esc((c.name || "?").split(" ").map((w) => w[0]).join("").slice(0, 2))}</span>
+          ${avatarHtml(c.avatar_url, c.name)}
           <div class="grow"><h3>${esc(c.name)}</h3><p class="muted">${esc(GOALS[c.goal] || "")}</p></div>
         </div>
         <p class="answer">${esc(c.about)}</p>
@@ -704,21 +937,81 @@ function displayNameFromProfile(p, fallback) {
 function updateUserbox(p) {
   const name = displayNameFromProfile(p, state.user?.name || `ID ${state.user?.user_id || ""}`);
   $("user-name").textContent = name || "Вход…";
-  const initials = [p?.first_name, p?.last_name]
-    .filter(Boolean)
-    .map((w) => w[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-  $("user-avatar").textContent =
-    initials ||
-    name
-      .split(/\s+/)
-      .map((w) => w[0])
-      .join("")
-      .slice(0, 2)
-      .toUpperCase() ||
-    "·";
+  const initials = initialsOf([p?.first_name, p?.last_name].filter(Boolean).join(" ") || name);
+  const url = p?.avatar_url || null;
+  for (const id of ["user-avatar", "profile-avatar"]) {
+    $(id).innerHTML = url ? `<img src="${esc(url)}" alt="">` : esc(initials);
+  }
+  $("avatar-remove").hidden = !url;
+  $("avatar-label").textContent = url ? "Сменить фото" : "Загрузить фото";
+}
+
+// ======================================================
+// АВАТАРКА
+// ======================================================
+
+// Обрезаем по центру до квадрата 256×256 и сжимаем в JPEG (~20–40 КБ).
+// Так на сервер не уходят огромные фото с телефона, а заодно отбрасываются EXIF и геометки.
+async function imageToAvatar(file) {
+  if (!file.type.startsWith("image/")) throw new Error("Выберите изображение");
+  if (file.size > 20 * 1024 * 1024) throw new Error("Файл больше 20 МБ");
+
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = () => reject(new Error("Не удалось открыть изображение. Попробуйте JPG или PNG."));
+      i.src = url;
+    });
+    const size = 256;
+    const side = Math.min(img.naturalWidth, img.naturalHeight);
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, size, size);
+    ctx.drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, size, size);
+    return canvas.toDataURL("image/jpeg", 0.85);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function setupAvatar() {
+  const input = $("avatar-input");
+  const label = input.closest("label");
+
+  input.addEventListener("change", async () => {
+    const file = input.files && input.files[0];
+    input.value = "";
+    if (!file) return;
+    label.classList.add("disabled");
+    $("avatar-label").textContent = "Загружаем…";
+    try {
+      const image = await imageToAvatar(file);
+      const { avatar_url } = await api("PUT", "/api/profile/avatar", { image });
+      state.profile = { ...(state.profile || {}), avatar_url };
+      toast("Фото обновлено");
+    } catch (error) {
+      toast(error.message, "error");
+    } finally {
+      label.classList.remove("disabled");
+      updateUserbox(state.profile);
+    }
+  });
+
+  $("avatar-remove").addEventListener("click", async (e) => {
+    if (!confirm("Удалить фото профиля?")) return;
+    try {
+      await busy(e.currentTarget, "Удаляем…", () => api("DELETE", "/api/profile/avatar"));
+      state.profile = { ...(state.profile || {}), avatar_url: null };
+      updateUserbox(state.profile);
+      toast("Фото удалено");
+    } catch (error) {
+      toast(error.message, "error");
+    }
+  });
 }
 
 async function loadProfile() {
@@ -1002,7 +1295,8 @@ async function loadResponses() {
         return `<article class="card">
           <div class="chips">${badge(st.text, st.tone)} ${badge(o.type, "gray")}</div>
           <h3>${esc(o.startup_name)}</h3>
-          <p class="muted">От: ${esc(o.sender_name || "пользователь MAX")} · ${dateText(o.created_at)}</p>
+          <div class="person small">${avatarHtml(o.sender_avatar_url, o.sender_name)}
+            <p class="muted">От: ${esc(o.sender_name || "пользователь MAX")} · ${dateText(o.created_at)}</p></div>
           <p class="answer">${esc(o.message)}</p>
           ${o.status === "new" ? `<div class="actions">
             <button class="btn secondary small" type="button" data-decide="reject" data-id="${o.id}">Отклонить</button>
@@ -1063,8 +1357,9 @@ async function loadContacts() {
     if (contacts.length === 0) empty(contactsEl, "Здесь появятся кандидаты, чьи отклики вы примете.");
     else contactsEl.innerHTML = contacts.map((c) => `<article class="card">
         <div class="chips">${badge("MATCH", "green")} ${badge(c.type, "gray")}</div>
-        <h3>${esc(c.candidate_name || "Пользователь MAX")}</h3>
-        <p class="muted">Проект: ${esc(c.startup_name)} · ${dateText(c.created_at)}</p>
+        <div class="person">${avatarHtml(c.candidate_avatar_url, c.candidate_name)}
+          <div class="grow"><h3>${esc(c.candidate_name || "Пользователь MAX")}</h3>
+          <p class="muted">Проект: ${esc(c.startup_name)} · ${dateText(c.created_at)}</p></div></div>
         ${contactLinks(c.candidate_phone, c.candidate_email)}
         <p class="answer">${esc(c.message)}</p>
       </article>`).join("");
@@ -1073,7 +1368,8 @@ async function loadContacts() {
     else matchesEl.innerHTML = matches.map((m) => `<article class="card">
         <div class="chips">${badge("MATCH", "green")} ${badge(m.type, "gray")}</div>
         <h3>${esc(m.startup_name)}</h3>
-        <p class="muted">Основатель: ${esc(m.founder_name || "пользователь MAX")} · ${dateText(m.created_at)}</p>
+        <div class="person small">${avatarHtml(m.founder_avatar_url, m.founder_name)}
+          <p class="muted">Основатель: ${esc(m.founder_name || "пользователь MAX")} · ${dateText(m.created_at)}</p></div>
         ${contactLinks(m.founder_phone, m.founder_email)}
         <p class="answer"><b>Ваш отклик.</b> ${esc(m.message)}</p>
       </article>`).join("");
@@ -1090,6 +1386,8 @@ async function loadContacts() {
 function showAuthError(message) {
   document.querySelectorAll(".view").forEach((v) => (v.hidden = true));
   $("tabbar").hidden = true;
+  $("menu-toggle").hidden = true;
+  setNav(false);
   $("view-auth").hidden = false;
   $("auth-text").textContent = message;
   $("user-name").textContent = "Не авторизован";
@@ -1115,6 +1413,8 @@ function needsOnboarding(profile) {
 
 async function authorize() {
   $("tabbar").hidden = false;
+  $("menu-toggle").hidden = false;
+  setNav(dockMq.matches);
 
   if (!initData && !debugUserId) {
     showAuthError("Мини-приложение работает только внутри MAX. Откройте его из чата с ботом SOBRA.");
@@ -1157,9 +1457,11 @@ async function authorize() {
 document.addEventListener("DOMContentLoaded", () => {
   if (WebApp && typeof WebApp.ready === "function") WebApp.ready();
 
+  setupSideMenu();
   setupNavigation();
   setupIdeaForm();
   setupProfileForm();
+  setupAvatar();
   setupSearchForm();
   setupOfferForm();
 

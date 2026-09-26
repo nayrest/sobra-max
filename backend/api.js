@@ -12,6 +12,7 @@ const express = require("express");
 const db = require("./db");
 const aiMatching = require("./ai-matching");
 const ideaCheck = require("./idea-check");
+const actionPlan = require("./action-plan");
 
 // ======================================================
 // СПРАВОЧНИКИ (совпадают со значениями, которые пишет бот)
@@ -149,6 +150,10 @@ function validateInitData(initData, botToken) {
   return { userId: Number(user.id), name };
 }
 
+function avatarUrl(token) {
+  return token ? `/api/avatars/${token}` : null;
+}
+
 function extractInitData(req) {
   const header = req.get("authorization") || "";
   if (header.startsWith("Bearer ")) return header.slice("Bearer ".length).trim();
@@ -196,7 +201,8 @@ function createApi({ notify = {} } = {}) {
   const app = express();
 
   app.disable("x-powered-by");
-  app.use(express.json({ limit: "100kb" }));
+  // 300 КБ — с запасом под аватарку (в браузере она сжимается до ~20–40 КБ)
+  app.use(express.json({ limit: "300kb" }));
 
   // Уведомления не должны ронять запрос: данные уже сохранены в БД
   const safeNotify = async (fn, ...args) => {
@@ -221,6 +227,24 @@ function createApi({ notify = {} } = {}) {
     res.json({ status: "ok" });
   }));
 
+  // ---------- аватарки (без авторизации: <img> не умеет слать заголовки) ----------
+  // Ссылка содержит случайный 128-битный токен и меняется при каждой загрузке фото.
+  // Токен выдаётся только через авторизованные ответы API: профиль, подбор, контакты.
+
+  app.get("/api/avatars/:token", wrap(async (req, res) => {
+    const token = String(req.params.token || "");
+    if (!/^[a-f0-9]{32}$/.test(token)) throw new ApiError(404, "Фото не найдено");
+
+    const avatar = await db.getAvatarByToken(token);
+    if (!avatar) throw new ApiError(404, "Фото не найдено");
+
+    res.setHeader("Content-Type", avatar.type);
+    res.setHeader("Content-Length", avatar.data.length);
+    res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.end(avatar.data);
+  }));
+
   // ---------- auth ----------
 
   app.post("/api/auth", wrap(async (req, res) => {
@@ -240,10 +264,49 @@ function createApi({ notify = {} } = {}) {
   // незаполненные честно попадут в карту проекта как «не проработано».
   const REQUIRED_IDEA = ["customer", "problem", "solution", "partner_needed"];
   const OPTIONAL_IDEA = ["competitors", "traction", "business_model", "economics"];
+  const IDEA_FIELD_MAX = 3000;
 
+  // Пересчитывает карту и приводит в соответствие Action Plan
   async function withIdeaMap(startup) {
     const { map, readiness } = await ideaCheck.buildIdeaMap(startup);
-    return db.saveIdeaMap(startup.id, map, readiness);
+    const saved = await db.saveIdeaMap(startup.id, map, readiness);
+    await db.syncTasks(startup.id, map);
+    return saved;
+  }
+
+  const BLOCK_TITLES = Object.fromEntries(ideaCheck.BLOCKS.map((b) => [b.id, b.title]));
+
+  function serializeTask(task) {
+    const template = actionPlan.templateFor(task.block_id);
+    const method = typeof task.method === "string" ? JSON.parse(task.method) : task.method;
+    return {
+      id: task.id,
+      block_id: task.block_id,
+      block_title: BLOCK_TITLES[task.block_id] || task.block_id,
+      title: task.title,
+      method: Array.isArray(method) ? method : template.method,
+      method_source: task.method_source,
+      result_hint: template.resultHint,
+      status: task.status,
+      result: task.result,
+      status_before: task.status_before,
+      status_after: task.status_after,
+      readiness_before: task.readiness_before,
+      readiness_after: task.readiness_after,
+      created_at: task.created_at,
+      done_at: task.done_at,
+    };
+  }
+
+  // Проект вместе с Action Plan. Если задач ещё нет (проект создан до появления
+  // Action Plan), они создаются по сохранённой карте.
+  async function withTasks(startup) {
+    let tasks = await db.getTasks(startup.id);
+    if (tasks.length === 0 && startup.idea_map) {
+      await db.syncTasks(startup.id, startup.idea_map);
+      tasks = await db.getTasks(startup.id);
+    }
+    return { ...startup, tasks: tasks.map(serializeTask) };
   }
 
   app.post("/api/startups", wrap(async (req, res) => {
@@ -262,7 +325,7 @@ function createApi({ notify = {} } = {}) {
     for (const field of OPTIONAL_IDEA) data[field] = optionalText(body, field);
 
     const startup = await db.saveStartupDraft(req.user.userId, data);
-    res.status(201).json(await withIdeaMap(startup));
+    res.status(201).json(await withTasks(await withIdeaMap(startup)));
   }));
 
   // Обновить отдельные блоки Idea Check без повторного прохождения всей формы
@@ -271,16 +334,17 @@ function createApi({ notify = {} } = {}) {
     const body = req.body || {};
     const fields = {};
 
+    // 3000 символов: в блок дописываются результаты проверок (шаг Update)
     for (const field of REQUIRED_IDEA) {
-      if (field in body) fields[field] = requireText(body, field);
+      if (field in body) fields[field] = requireText(body, field, IDEA_FIELD_MAX);
     }
     for (const field of OPTIONAL_IDEA) {
-      if (field in body) fields[field] = optionalText(body, field);
+      if (field in body) fields[field] = optionalText(body, field, IDEA_FIELD_MAX);
     }
     if (Object.keys(fields).length === 0) throw new ApiError(400, "Нет полей для обновления");
 
     const updated = await db.updateIdeaFields(startup.id, req.user.userId, fields);
-    res.json(await withIdeaMap(updated));
+    res.json(await withTasks(await withIdeaMap(updated)));
   }));
 
   // /my и /public/:id объявлены раньше /:id, чтобы не перехватывались им
@@ -304,7 +368,72 @@ function createApi({ notify = {} } = {}) {
   }
 
   app.get("/api/startups/:id", wrap(async (req, res) => {
-    res.json(await getOwnStartup(req));
+    let startup = await getOwnStartup(req);
+    // Проекты, созданные до Idea Check (например, демо-данные), получают карту при первом открытии
+    if (!startup.idea_map) startup = await withIdeaMap(startup);
+    res.json(await withTasks(startup));
+  }));
+
+  // ---------- Action Plan (шаг 3) и Update (шаг 4) ----------
+
+  async function getOwnOpenTask(req, startup) {
+    const task = await db.getTask(startup.id, parseId(req.params.taskId));
+    if (!task) throw new ApiError(404, "Задача не найдена");
+    if (task.status !== "open") throw new ApiError(409, "Эта задача уже выполнена");
+    return task;
+  }
+
+  // ИИ расписывает методику под конкретный проект. Если ИИ недоступен — остаётся шаблон.
+  app.post("/api/startups/:id/tasks/:taskId/method", wrap(async (req, res) => {
+    const startup = await getOwnStartup(req);
+    const task = await getOwnOpenTask(req, startup);
+
+    const { steps, source } = await actionPlan.buildMethod(startup, task);
+    const saved = source === "ai" ? await db.saveTaskMethod(task.id, steps, source) : task;
+    res.json({ task: serializeTask(saved), ai: source === "ai" });
+  }));
+
+  // Update: основатель вернулся с результатом. Результат дописывается в блок,
+  // карта пересчитывается, в задаче фиксируется «было → стало».
+  // Если блок всё ещё не подтверждён, по нему появляется следующая задача.
+  app.post("/api/startups/:id/tasks/:taskId/complete", wrap(async (req, res) => {
+    const startup = await getOwnStartup(req);
+    const task = await getOwnOpenTask(req, startup);
+    const result = requireText(req.body || {}, "result", 1000);
+
+    const block = ideaCheck.BLOCKS.find((b) => b.id === task.block_id);
+    if (!block) throw new ApiError(400, "Неизвестный блок карты");
+
+    const nextValue = actionPlan.appendResult(startup[block.field], result);
+    if (nextValue.length > IDEA_FIELD_MAX) {
+      throw new ApiError(400, "В блоке накопилось слишком много текста. Сократите его через «Обновить блок» и попробуйте снова.");
+    }
+
+    const statusBefore = startup.idea_map?.[block.id]?.status || "missing";
+    const readinessBefore = startup.readiness ?? 0;
+
+    const closed = await db.completeTask(task.id, { result, statusBefore, readinessBefore });
+    if (!closed) throw new ApiError(409, "Эта задача уже выполнена");
+
+    const updated = await withIdeaMap(
+      await db.updateIdeaFields(startup.id, req.user.userId, { [block.field]: nextValue })
+    );
+    const statusAfter = updated.idea_map?.[block.id]?.status || "missing";
+    await db.saveTaskOutcome(task.id, statusAfter, updated.readiness);
+
+    res.json({
+      startup: await withTasks(updated),
+      update: {
+        task_id: task.id,
+        block_id: block.id,
+        block_title: block.title,
+        status_before: statusBefore,
+        status_after: statusAfter,
+        readiness_before: readinessBefore,
+        readiness_after: updated.readiness,
+        comment: updated.idea_map?.[block.id]?.comment || "",
+      },
+    });
   }));
 
   app.post("/api/startups/:id/publish", wrap(async (req, res) => {
@@ -354,7 +483,9 @@ function createApi({ notify = {} } = {}) {
   }));
 
   app.get("/api/search/profile", wrap(async (req, res) => {
-    res.json(await db.getSearchProfile(req.user.userId));
+    // Байты фото в JSON не нужны: для картинки есть /api/avatars/:token
+    const { avatar, ...profile } = (await db.getSearchProfile(req.user.userId)) || {};
+    res.json(Object.keys(profile).length ? profile : null);
   }));
 
   // ---------- профиль кандидата ----------
@@ -387,6 +518,7 @@ function createApi({ notify = {} } = {}) {
       about: profile?.about || "",
       visible: Boolean(profile?.visible),
       consent: Boolean(profile?.contacts_consent_at),
+      avatar_url: avatarUrl(profile?.avatar_token),
     });
   }));
 
@@ -448,7 +580,41 @@ function createApi({ notify = {} } = {}) {
       about,
       visible,
       consent: true,
+      avatar_url: avatarUrl(current?.avatar_token),
     });
+  }));
+
+  // ---------- аватарка ----------
+
+  // Принимаем data URL. Картинку в браузере заранее обрезаем до квадрата 256×256 и сжимаем.
+  const AVATAR_MAX_BYTES = 200 * 1024;
+  const AVATAR_SIGNATURES = {
+    "image/jpeg": (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+    "image/png": (b) => b.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+    "image/webp": (b) => b.slice(0, 4).toString("latin1") === "RIFF" && b.slice(8, 12).toString("latin1") === "WEBP",
+  };
+
+  app.put("/api/profile/avatar", wrap(async (req, res) => {
+    const image = req.body?.image;
+    const match = typeof image === "string" && image.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/]+={0,2})$/);
+    if (!match) throw new ApiError(400, "Загрузите изображение JPG, PNG или WebP");
+
+    const [, mimeType, base64] = match;
+    const bytes = Buffer.from(base64, "base64");
+    if (bytes.length === 0 || bytes.length > AVATAR_MAX_BYTES) {
+      throw new ApiError(400, "Фото слишком большое: не больше 200 КБ после сжатия");
+    }
+    // Проверяем содержимое, а не только заявленный тип
+    if (!AVATAR_SIGNATURES[mimeType](bytes)) throw new ApiError(400, "Файл не похож на изображение");
+
+    const token = crypto.randomBytes(16).toString("hex");
+    await db.saveAvatar(req.user.userId, mimeType, bytes.toString("base64"), token);
+    res.json({ avatar_url: avatarUrl(token) });
+  }));
+
+  app.delete("/api/profile/avatar", wrap(async (req, res) => {
+    await db.deleteAvatar(req.user.userId);
+    res.status(204).end();
   }));
 
   // ---------- подбор людей для основателя и приглашения ----------
@@ -472,6 +638,7 @@ function createApi({ notify = {} } = {}) {
       candidates: candidates.map((c) => ({
         user_id: Number(c.user_id),
         name: c.name || "Пользователь MAX",
+        avatar_url: avatarUrl(c.avatar_token),
         goal: c.goal,
         about: c.about,
         ai: c.ai || null,
@@ -526,7 +693,7 @@ function createApi({ notify = {} } = {}) {
 
   app.get("/api/offers/received", wrap(async (req, res) => {
     const offers = await db.getReceivedOffers(req.user.userId);
-    res.json({ offers });
+    res.json({ offers: offers.map(({ sender_avatar, ...o }) => ({ ...o, sender_avatar_url: avatarUrl(sender_avatar) })) });
   }));
 
   async function decideOffer(req, res, status, notifyFn) {
@@ -559,12 +726,12 @@ function createApi({ notify = {} } = {}) {
 
   app.get("/api/contacts", wrap(async (req, res) => {
     const contacts = await db.getContactsForFounder(req.user.userId);
-    res.json({ contacts });
+    res.json({ contacts: contacts.map(({ candidate_avatar, ...c }) => ({ ...c, candidate_avatar_url: avatarUrl(candidate_avatar) })) });
   }));
 
   app.get("/api/matches", wrap(async (req, res) => {
     const matches = await db.getContactsForCandidate(req.user.userId);
-    res.json({ matches });
+    res.json({ matches: matches.map(({ founder_avatar, ...m }) => ({ ...m, founder_avatar_url: avatarUrl(founder_avatar) })) });
   }));
 
   // ---------- 404 и общий обработчик ошибок ----------

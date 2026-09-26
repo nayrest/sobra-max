@@ -137,7 +137,10 @@ async function deleteDraft(startupId, founderId) {
 
 async function getFounderStartups(founderId) {
   const { rows } = await pool.query(
-    `SELECT * FROM startups WHERE founder_id = $1 ORDER BY id DESC`,
+    `SELECT startups.*,
+       (SELECT COUNT(*)::int FROM action_tasks t WHERE t.startup_id = startups.id AND t.status = 'open') AS tasks_open,
+       (SELECT COUNT(*)::int FROM action_tasks t WHERE t.startup_id = startups.id AND t.status = 'done') AS tasks_done
+     FROM startups WHERE founder_id = $1 ORDER BY id DESC`,
     [founderId]
   );
 
@@ -306,9 +309,10 @@ async function updateOfferStatus(offerId, status) {
 
 async function getReceivedOffers(founderId) {
   const { rows } = await pool.query(
-    `SELECT offers.*, startups.name AS startup_name
+    `SELECT offers.*, startups.name AS startup_name, sp.avatar_token AS sender_avatar
      FROM offers
      JOIN startups ON startups.id = offers.startup_id
+     LEFT JOIN search_profiles sp ON sp.user_id = offers.sender_id
      WHERE startups.founder_id = $1
      ORDER BY offers.id DESC`,
     [founderId]
@@ -329,6 +333,7 @@ async function getContactsForFounder(founderId) {
        COALESCE(sp.full_name, offers.sender_name) AS candidate_name,
        CASE WHEN sp.contacts_consent_at IS NOT NULL THEN sp.phone END AS candidate_phone,
        CASE WHEN sp.contacts_consent_at IS NOT NULL THEN sp.email END AS candidate_email,
+       sp.avatar_token AS candidate_avatar,
        offers.type,
        offers.message,
        offers.created_at,
@@ -360,7 +365,8 @@ async function getContactsForCandidate(senderId) {
        startups.founder_id,
        COALESCE(sp.full_name, u.name) AS founder_name,
        CASE WHEN sp.contacts_consent_at IS NOT NULL THEN sp.phone END AS founder_phone,
-       CASE WHEN sp.contacts_consent_at IS NOT NULL THEN sp.email END AS founder_email
+       CASE WHEN sp.contacts_consent_at IS NOT NULL THEN sp.email END AS founder_email,
+       sp.avatar_token AS founder_avatar
      FROM offers
      JOIN startups ON startups.id = offers.startup_id
      LEFT JOIN search_profiles sp ON sp.user_id = startups.founder_id
@@ -389,7 +395,7 @@ async function getCandidatesForStartup(startup, limit = 20) {
   const goal = SEEKING_TO_GOAL[startup.seeking];
 
   const { rows } = await pool.query(
-    `SELECT sp.user_id, sp.goal, sp.category, sp.about, sp.max_investment, u.name
+    `SELECT sp.user_id, sp.goal, sp.category, sp.about, sp.max_investment, sp.avatar_token, u.name
      FROM search_profiles sp
      LEFT JOIN users u ON u.user_id = sp.user_id
      WHERE sp.visible = TRUE
@@ -449,8 +455,139 @@ async function getInvitesForUser(userId) {
   return rows;
 }
 
+// ======================================================
+// ACTION PLAN И UPDATE
+// ======================================================
+
+const { BLOCKS } = require("./idea-check");
+const actionPlan = require("./action-plan");
+
+const BLOCK_ORDER = Object.fromEntries(BLOCKS.map((b, i) => [b.id, i]));
+
+/**
+ * Приводит задачи в соответствие с картой проекта:
+ * по каждому неподтверждённому блоку — одна открытая задача,
+ * открытые задачи по подтверждённым блокам закрываются сами.
+ */
+async function syncTasks(startupId, ideaMap) {
+  const { toOpen, toClose } = actionPlan.planFromMap(ideaMap);
+
+  if (toClose.length) {
+    await pool.query(
+      `UPDATE action_tasks
+       SET status = 'done', status_after = 'confirmed', done_at = NOW()
+       WHERE startup_id = $1 AND status = 'open' AND block_id = ANY(string_to_array($2, ','))`,
+      [startupId, toClose.join(",")]
+    );
+  }
+
+  for (const blockId of toOpen) {
+    const template = actionPlan.templateFor(blockId);
+    await pool.query(
+      `INSERT INTO action_tasks (startup_id, block_id, title, method, method_source)
+       VALUES ($1, $2, $3, $4, 'template')
+       ON CONFLICT (startup_id, block_id) WHERE status = 'open' DO NOTHING`,
+      [startupId, blockId, template.title, JSON.stringify(template.method)]
+    );
+  }
+}
+
+// Открытые задачи — в порядке блоков карты, выполненные — от новых к старым
+async function getTasks(startupId) {
+  const { rows } = await pool.query(
+    `SELECT * FROM action_tasks WHERE startup_id = $1 ORDER BY id`,
+    [startupId]
+  );
+  const open = rows
+    .filter((t) => t.status === "open")
+    .sort((a, b) => (BLOCK_ORDER[a.block_id] ?? 99) - (BLOCK_ORDER[b.block_id] ?? 99));
+  const done = rows
+    .filter((t) => t.status === "done")
+    .sort((a, b) => new Date(b.done_at) - new Date(a.done_at) || b.id - a.id);
+  return [...open, ...done];
+}
+
+async function getTask(startupId, taskId) {
+  const { rows } = await pool.query(
+    `SELECT * FROM action_tasks WHERE id = $1 AND startup_id = $2`,
+    [taskId, startupId]
+  );
+  return rows[0] || null;
+}
+
+async function saveTaskMethod(taskId, steps, source) {
+  const { rows } = await pool.query(
+    `UPDATE action_tasks SET method = $2, method_source = $3 WHERE id = $1 RETURNING *`,
+    [taskId, JSON.stringify(steps), source]
+  );
+  return rows[0] || null;
+}
+
+// Update, часть 1: закрываем задачу и запоминаем, каким блок был до обновления
+async function completeTask(taskId, { result, statusBefore, readinessBefore }) {
+  const { rows } = await pool.query(
+    `UPDATE action_tasks
+     SET status = 'done', result = $2, status_before = $3, readiness_before = $4, done_at = NOW()
+     WHERE id = $1 AND status = 'open'
+     RETURNING *`,
+    [taskId, result, statusBefore, readinessBefore]
+  );
+  return rows[0] || null;
+}
+
+// Update, часть 2: каким блок стал после пересчёта карты
+async function saveTaskOutcome(taskId, statusAfter, readinessAfter) {
+  const { rows } = await pool.query(
+    `UPDATE action_tasks SET status_after = $2, readiness_after = $3 WHERE id = $1 RETURNING *`,
+    [taskId, statusAfter, readinessAfter]
+  );
+  return rows[0] || null;
+}
+
+// ======================================================
+// АВАТАРКИ
+// ======================================================
+
+// data — картинка в base64. Строка профиля может ещё не существовать
+// (фото загружают при первом заполнении профиля), поэтому UPSERT.
+async function saveAvatar(userId, mimeType, base64, token) {
+  await pool.query(
+    `INSERT INTO search_profiles (user_id, avatar, avatar_type, avatar_token)
+     VALUES ($1, decode($2, 'base64'), $3, $4)
+     ON CONFLICT (user_id) DO UPDATE SET
+       avatar = EXCLUDED.avatar, avatar_type = EXCLUDED.avatar_type, avatar_token = EXCLUDED.avatar_token`,
+    [userId, base64, mimeType, token]
+  );
+}
+
+async function deleteAvatar(userId) {
+  await pool.query(
+    `UPDATE search_profiles SET avatar = NULL, avatar_type = NULL, avatar_token = NULL WHERE user_id = $1`,
+    [userId]
+  );
+}
+
+async function getAvatarByToken(token) {
+  const { rows } = await pool.query(
+    `SELECT avatar_type, encode(avatar, 'base64') AS data
+     FROM search_profiles WHERE avatar_token = $1 AND avatar IS NOT NULL`,
+    [token]
+  );
+  if (!rows[0]) return null;
+  return { type: rows[0].avatar_type, data: Buffer.from(rows[0].data, "base64") };
+}
+
 module.exports = {
   pool,
+  syncTasks,
+  getTasks,
+  getTask,
+  saveTaskMethod,
+  completeTask,
+  saveTaskOutcome,
+  saveAvatar,
+  deleteAvatar,
+  getAvatarByToken,
   init,
   ensureUser,
   saveStartupDraft,

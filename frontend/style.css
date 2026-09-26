@@ -68,9 +68,23 @@ button { cursor: pointer; }
 .userbox span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
 .avatar {
   flex: 0 0 auto; width: 34px; height: 34px; border-radius: 50%;
-  display: grid; place-items: center;
+  display: grid; place-items: center; overflow: hidden;
   background: #eef3ff; color: var(--blue); font-weight: 800; font-size: 13px;
 }
+.avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.person .avatar { width: 44px; height: 44px; font-size: 15px; }
+.person.small { align-items: center; margin: 4px 0; }
+.person.small .avatar { width: 28px; height: 28px; font-size: 11px; }
+.person.small .muted { margin: 0; }
+.avatar.xl { width: 84px; height: 84px; font-size: 28px; }
+
+.menu-toggle {
+  display: none; place-items: center;
+  width: 40px; height: 40px; margin-right: -4px;
+  border: 1px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink);
+}
+.menu-toggle svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.topbar .brand { margin-right: auto; }
 
 /* ---------- Нижнее меню ---------- */
 
@@ -310,3 +324,152 @@ h2.section { margin: 22px 0 10px; }
   overflow-wrap: anywhere;
 }
 .contact-link:focus-visible { outline: 2px solid var(--violet, #7041f5); outline-offset: 2px; }
+
+/* ---------- Аватарка в профиле ---------- */
+
+.avatar-edit { display: flex; gap: 16px; align-items: center; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.avatar-edit .muted { font-size: 13px; }
+.avatar-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.file-btn { display: inline-flex; align-items: center; cursor: pointer; }
+.file-btn.disabled { opacity: 0.6; pointer-events: none; }
+.file-btn:focus-within { outline: 2px solid var(--violet); outline-offset: 2px; }
+.visually-hidden {
+  position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* ---------- Пять шагов SOBRA ---------- */
+
+.journey {
+  display: flex; gap: 8px; overflow-x: auto; margin: 0 -16px 14px; padding: 2px 16px 6px;
+  scroll-snap-type: x proximity;
+}
+.journey-step {
+  flex: 0 0 auto; scroll-snap-align: start;
+  display: flex; align-items: center; gap: 10px; text-align: left;
+  min-width: 150px; padding: 10px 12px;
+  background: #fff; border: 1px solid var(--line); border-radius: 14px; color: var(--ink);
+}
+.journey-step:disabled { cursor: default; }
+.journey-num {
+  flex: 0 0 auto; width: 30px; height: 30px; border-radius: 50%;
+  display: grid; place-items: center; font-weight: 800; font-size: 12px;
+  background: #f1f3f8; color: #56637f;
+}
+.journey-text { display: flex; flex-direction: column; min-width: 0; }
+.journey-text b { font-size: 13px; }
+.journey-text small { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.journey-step.done .journey-num { background: var(--green-bg); color: var(--green); font-size: 15px; }
+.journey-step.active { border-color: #c9d6ff; background: #f5f8ff; }
+.journey-step.active .journey-num { background: var(--grad); color: #fff; }
+
+/* ---------- Карта: иконки статуса ---------- */
+
+.map-icon {
+  display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  font-size: 13px; margin-right: 4px; vertical-align: 1px;
+  background: var(--red-bg); color: var(--red);
+}
+.map-card.confirmed .map-icon { background: var(--green-bg); color: var(--green); }
+.map-card.hypothesis .map-icon { background: var(--amber-bg); color: var(--amber); }
+.map-card.confirmed { border-color: #cdebd9; }
+.map-card .answer { white-space: pre-line; }
+
+/* ---------- Action Plan ---------- */
+
+.plan { margin-top: 12px; }
+.plan-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.plan-head h2 { margin: 0; }
+.plan-count {
+  flex: 0 0 auto; padding: 6px 12px; border-radius: 999px;
+  background: #eef3ff; color: var(--blue); font-weight: 800; font-size: 14px;
+}
+.plan-mini { font-size: 13px; }
+.tasks { display: grid; gap: 10px; margin-top: 12px; }
+.task { border: 1px solid var(--line); border-radius: 14px; padding: 14px; background: #fcfdff; }
+.task-head { display: flex; gap: 12px; align-items: flex-start; }
+.task-head h3 { margin: 0 0 4px; }
+.task-box {
+  flex: 0 0 auto; width: 22px; height: 22px; margin-top: 1px;
+  border: 2px solid #c3cde6; border-radius: 6px; background: #fff;
+}
+.method { margin-top: 10px; font-size: 14px; color: var(--ink-soft); }
+.method summary { cursor: pointer; font-weight: 800; color: #2b61ec; }
+.method ol { margin: 8px 0; padding-left: 20px; display: grid; gap: 4px; }
+.task-result { margin-top: 12px; }
+.hint { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+
+/* ---------- Update ---------- */
+
+.update-banner { border-color: #f1ddb0; background: linear-gradient(135deg, #fffaf0, #fff); }
+.update-banner.ok { border-color: #bfe6cf; background: linear-gradient(135deg, #effbf4, #fff); }
+.update-banner h3 { margin-bottom: 8px; }
+.transition { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0; }
+.transition .arrow { color: var(--muted); font-weight: 800; }
+.transition.small .badge { font-size: 11px; padding: 3px 8px; }
+
+.history { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 12px; }
+.history-item { display: flex; gap: 12px; align-items: flex-start; }
+.history-icon {
+  flex: 0 0 auto; width: 28px; height: 28px; border-radius: 50%;
+  display: grid; place-items: center; font-weight: 800;
+  background: var(--amber-bg); color: var(--amber);
+}
+.history-icon.ok { background: var(--green-bg); color: var(--green); }
+.history-item .answer { margin: 4px 0 0; font-size: 14px; }
+
+/* ---------- Меню: на телефоне нижняя панель, служебные блоки скрыты ---------- */
+
+.nav-title, .nav-cycle { display: none; }
+.nav-backdrop { position: fixed; inset: 0; z-index: 25; background: rgba(12, 31, 74, 0.35); }
+
+/* ---------- ПК: меню сбоку (off-canvas) ---------- */
+
+@media (min-width: 900px) {
+  :root { --sidebar: 256px; }
+
+  .menu-toggle { display: inline-grid; }
+  .topbar { padding: 0 24px; }
+
+  .tabbar {
+    top: 60px; bottom: 0; left: 0; right: auto;
+    width: var(--sidebar); height: auto;
+    flex-direction: column; gap: 4px;
+    padding: 16px 12px 20px;
+    border-top: 0; border-right: 1px solid #e7ebf6;
+    overflow-y: auto;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease, box-shadow 0.22s ease;
+  }
+  body.nav-open .tabbar { transform: none; box-shadow: 12px 0 32px rgba(19, 33, 75, 0.08); }
+
+  .tabbar button {
+    flex: 0 0 auto;
+    flex-direction: row; justify-content: flex-start; gap: 12px;
+    padding: 11px 14px; font-size: 15px; color: var(--ink-soft);
+  }
+  .tabbar button:hover { background: #f5f7fd; }
+  .tabbar button.active { background: #eef3ff; color: var(--blue); }
+
+  .nav-title { display: block; margin: 4px 14px 8px; font-size: 12px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .nav-cycle { display: block; margin-top: auto; padding: 14px; border-radius: 14px; background: linear-gradient(135deg, #f6f9ff, #f4f0ff); }
+  .nav-cycle .nav-title { margin: 0 0 8px; }
+  .nav-cycle ol { margin: 0; padding-left: 18px; font-size: 13px; color: var(--ink-soft); display: grid; gap: 6px; }
+
+  .content { max-width: 960px; padding: 28px 24px 48px; transition: padding 0.22s ease; }
+  .page-head h1 { font-size: 30px; }
+  .journey { margin: 0 0 16px; padding: 2px 0 6px; overflow: visible; display: grid; grid-template-columns: repeat(5, 1fr); }
+  .journey-step { min-width: 0; }
+  .journey-text small { white-space: normal; }
+  .toast { bottom: 24px; }
+
+  .sheet-backdrop { align-items: center; }
+  .sheet { border-radius: 20px; max-width: 560px; padding: 24px; }
+}
+
+/* Широкий экран: меню закреплено, контент сдвигается вправо */
+@media (min-width: 1200px) {
+  body.nav-open .content { max-width: calc(960px + var(--sidebar)); padding-left: calc(var(--sidebar) + 40px); }
+  body.nav-open .tabbar { box-shadow: none; }
+  body.nav-open .toast { left: calc(50% + var(--sidebar) / 2); }
+}
