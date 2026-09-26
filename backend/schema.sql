@@ -89,6 +89,10 @@ ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS patronymic TEXT;
 ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS email TEXT;
 ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS phone TEXT;
 
+-- Когда пользователь согласился показывать ФИО, телефон и e-mail тому, с кем случится MATCH.
+-- Без согласия контакты никому не отдаются.
+ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS contacts_consent_at TIMESTAMPTZ;
+
 CREATE TABLE IF NOT EXISTS invites (
   id          SERIAL PRIMARY KEY,
   startup_id  INTEGER NOT NULL REFERENCES startups (id) ON DELETE CASCADE,

@@ -251,6 +251,16 @@ async function saveSearchProfile(userId, criteria) {
   );
 }
 
+// Фиксируем момент согласия один раз; повторное сохранение профиля его не сдвигает
+async function saveContactsConsent(userId) {
+  await pool.query(
+    `UPDATE search_profiles
+     SET contacts_consent_at = COALESCE(contacts_consent_at, NOW())
+     WHERE user_id = $1`,
+    [userId]
+  );
+}
+
 async function getSearchProfile(userId) {
   const { rows } = await pool.query(
     `SELECT * FROM search_profiles WHERE user_id = $1`,
@@ -309,12 +319,16 @@ async function getReceivedOffers(founderId) {
 
 // "Список кандидатов" у предпринимателя — принятые предложения
 // по его стартапам (после MATCH можно продолжать общение в MAX).
+// Контакты (ФИО, телефон, e-mail) отдаются только по принятому отклику
+// и только если человек дал согласие на их показ.
 async function getContactsForFounder(founderId) {
   const { rows } = await pool.query(
     `SELECT
        offers.id AS offer_id,
        offers.sender_id AS candidate_id,
-       offers.sender_name AS candidate_name,
+       COALESCE(sp.full_name, offers.sender_name) AS candidate_name,
+       CASE WHEN sp.contacts_consent_at IS NOT NULL THEN sp.phone END AS candidate_phone,
+       CASE WHEN sp.contacts_consent_at IS NOT NULL THEN sp.email END AS candidate_email,
        offers.type,
        offers.message,
        offers.created_at,
@@ -322,6 +336,7 @@ async function getContactsForFounder(founderId) {
        startups.name AS startup_name
      FROM offers
      JOIN startups ON startups.id = offers.startup_id
+     LEFT JOIN search_profiles sp ON sp.user_id = offers.sender_id
      WHERE startups.founder_id = $1
        AND offers.status = 'accepted'
      ORDER BY offers.id DESC`,
@@ -342,9 +357,14 @@ async function getContactsForCandidate(senderId) {
        offers.created_at,
        startups.id AS startup_id,
        startups.name AS startup_name,
-       startups.founder_id
+       startups.founder_id,
+       COALESCE(sp.full_name, u.name) AS founder_name,
+       CASE WHEN sp.contacts_consent_at IS NOT NULL THEN sp.phone END AS founder_phone,
+       CASE WHEN sp.contacts_consent_at IS NOT NULL THEN sp.email END AS founder_email
      FROM offers
      JOIN startups ON startups.id = offers.startup_id
+     LEFT JOIN search_profiles sp ON sp.user_id = startups.founder_id
+     LEFT JOIN users u ON u.user_id = startups.founder_id
      WHERE offers.sender_id = $1
        AND offers.status = 'accepted'
      ORDER BY offers.id DESC`,
@@ -442,6 +462,7 @@ module.exports = {
   findMatches,
   saveSearchProfile,
   getSearchProfile,
+  saveContactsConsent,
   createOffer,
   getOfferWithStartup,
   updateOfferStatus,

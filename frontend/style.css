@@ -299,3 +299,14 @@ h2.section { margin: 22px 0 10px; }
   background: var(--ink); color: #fff; font-size: 14px;
 }
 .toast.error { background: var(--red); }
+
+/* ---------- Контакты после MATCH ---------- */
+
+.contact-links { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.contact-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 12px; border-radius: 10px;
+  background: #eef3ff; color: #2459e0; font-weight: 700; text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.contact-link:focus-visible { outline: 2px solid var(--violet, #7041f5); outline-offset: 2px; }

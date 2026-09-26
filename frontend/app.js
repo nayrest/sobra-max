@@ -749,6 +749,7 @@ async function loadProfile() {
     form.elements.category.value = p.category || "Любая";
     form.elements.about.value = p.about || "";
     form.elements.visible.checked = p.visible;
+    form.elements.consent.checked = Boolean(p.consent);
     updateUserbox(p);
   } catch (error) {
     formError("profile-error", error);
@@ -795,6 +796,11 @@ function setupProfileForm() {
       formError("profile-error", new Error("Расскажите о себе хотя бы в паре предложений — по этому тексту ИИ подбирает проекты."));
       return;
     }
+    if (!f.consent.checked) {
+      f.consent.focus();
+      formError("profile-error", new Error("Отметьте согласие: без него контакты нельзя передать после MATCH."));
+      return;
+    }
 
     const button = form.querySelector("button[type=submit]");
     try {
@@ -809,6 +815,7 @@ function setupProfileForm() {
           category: f.category.value,
           about: f.about.value.trim(),
           visible: f.visible.checked,
+          consent: true,
         })
       );
       updateUserbox(state.profile);
@@ -1035,6 +1042,15 @@ async function handleDecision(event) {
 // КОНТАКТЫ
 // ======================================================
 
+// Телефон и e-mail приходят с сервера только после MATCH и только при согласии человека
+function contactLinks(phone, email) {
+  const links = [];
+  if (phone) links.push(`<a class="contact-link" href="tel:${esc(phone)}">📞 ${esc(formatRuPhone(phone))}</a>`);
+  if (email) links.push(`<a class="contact-link" href="mailto:${esc(email)}">✉️ ${esc(email)}</a>`);
+  if (links.length === 0) return `<p class="muted">Контакты пока не указаны в профиле.</p>`;
+  return `<div class="contact-links">${links.join("")}</div>`;
+}
+
 async function loadContacts() {
   const contactsEl = $("contacts-list");
   const matchesEl = $("matches-list");
@@ -1049,6 +1065,7 @@ async function loadContacts() {
         <div class="chips">${badge("MATCH", "green")} ${badge(c.type, "gray")}</div>
         <h3>${esc(c.candidate_name || "Пользователь MAX")}</h3>
         <p class="muted">Проект: ${esc(c.startup_name)} · ${dateText(c.created_at)}</p>
+        ${contactLinks(c.candidate_phone, c.candidate_email)}
         <p class="answer">${esc(c.message)}</p>
       </article>`).join("");
 
@@ -1056,8 +1073,9 @@ async function loadContacts() {
     else matchesEl.innerHTML = matches.map((m) => `<article class="card">
         <div class="chips">${badge("MATCH", "green")} ${badge(m.type, "gray")}</div>
         <h3>${esc(m.startup_name)}</h3>
-        <p class="muted">Ваш отклик · ${dateText(m.created_at)}</p>
-        <p class="answer">${esc(m.message)}</p>
+        <p class="muted">Основатель: ${esc(m.founder_name || "пользователь MAX")} · ${dateText(m.created_at)}</p>
+        ${contactLinks(m.founder_phone, m.founder_email)}
+        <p class="answer"><b>Ваш отклик.</b> ${esc(m.message)}</p>
       </article>`).join("");
   } catch (error) {
     failed(contactsEl, error, loadContacts);
@@ -1090,7 +1108,8 @@ function needsOnboarding(profile) {
     !profile.email ||
     !String(profile.email).trim() ||
     !profile.phone ||
-    !String(profile.phone).trim()
+    !String(profile.phone).trim() ||
+    !profile.consent
   );
 }
 

@@ -386,6 +386,7 @@ function createApi({ notify = {} } = {}) {
       category: profile?.category || "Любая",
       about: profile?.about || "",
       visible: Boolean(profile?.visible),
+      consent: Boolean(profile?.contacts_consent_at),
     });
   }));
 
@@ -411,6 +412,11 @@ function createApi({ notify = {} } = {}) {
     const goal = requireOneOf(body.goal, Object.keys(SEEKING), "goal");
     const about = requireText(body, "about", 1500);
     const visible = body.visible === true;
+
+    // Без согласия не сохраняем контакты: их увидит тот, с кем случится MATCH
+    if (body.consent !== true) {
+      throw new ApiError(400, "Подтвердите согласие на показ контактов после MATCH");
+    }
     const fullName = [lastName, firstName, patronymic].filter(Boolean).join(" ");
 
     await db.saveSearchProfile(req.user.userId, {
@@ -427,6 +433,7 @@ function createApi({ notify = {} } = {}) {
       email,
       phone,
     });
+    await db.saveContactsConsent(req.user.userId);
 
     res.json({
       name: req.user.name,
@@ -440,6 +447,7 @@ function createApi({ notify = {} } = {}) {
       category: body.category || "Любая",
       about,
       visible,
+      consent: true,
     });
   }));
 
