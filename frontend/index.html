@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#f7f9ff">
+  <title>SOBRA AI</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- MAX Bridge: даёт window.WebApp.initData для авторизации -->
+  <script src="https://st.max.ru/js/max-web-app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Меню" aria-controls="tabbar" aria-expanded="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+    <div class="brand">
+      <img src="logo.png" alt="SOBRA" class="brand-logo" width="32" height="32">
+      <span>SOBRA <b>AI</b></span>
+    </div>
+    <div class="userbox"><span class="avatar" id="user-avatar" aria-hidden="true">·</span><span id="user-name">Вход…</span></div>
+  </header>
+
+  <main class="content" id="content">
+    <!-- Нет авторизации -->
+    <section id="view-auth" class="view" hidden>
+      <div class="card center">
+        <h2>Откройте SOBRA из MAX</h2>
+        <p class="muted" id="auth-text">Мини-приложение работает только внутри чата с ботом в MAX.</p>
+        <button class="btn primary" id="auth-retry" type="button">Попробовать снова</button>
+      </div>
+    </section>
+
+    <!-- ================= ОСНОВАТЕЛЬ ================= -->
+
+    <section id="view-projects" class="view" hidden>
+      <div class="page-head">
+        <h1>Мои проекты</h1>
+        <p>Проверьте идею, посмотрите карту проекта и найдите партнёра, который закроет недостающие компетенции.</p>
+      </div>
+      <button class="btn primary block" id="open-idea" type="button">+ Проверить новую идею</button>
+      <div id="projects-list" class="list"></div>
+    </section>
+
+    <section id="view-idea" class="view" hidden>
+      <button class="back" type="button" data-back="projects">← Мои проекты</button>
+      <div class="page-head">
+        <h1>Проверка идеи</h1>
+        <p>Ответьте честно. SOBRA не оценивает, хорошая ли идея, а показывает, что уже проработано, а что нужно проверить.</p>
+      </div>
+
+      <form id="idea-form" novalidate>
+        <div class="card">
+          <div class="step-head"><span class="step-num">1</span><div><h2>О проекте</h2><p class="muted">Основная информация</p></div></div>
+          <div class="form-grid">
+            <label class="field wide"><span>Название <b class="required">*</b></span>
+              <input class="input" name="name" maxlength="100" placeholder="Например, Кофейня «Зерно у дома»"></label>
+            <label class="field"><span>Сфера <b class="required">*</b></span>
+              <select class="input" name="category">
+                <option value="">Выберите</option>
+                <option>AI</option><option>SaaS</option><option>FoodTech</option><option>FinTech</option>
+                <option>EdTech</option><option>E-commerce</option><option>Другое</option>
+              </select></label>
+            <label class="field"><span>Рынок <b class="required">*</b></span>
+              <select class="input" name="market_type">
+                <option value="">Выберите</option><option>B2B</option><option>B2C</option><option>B2B2C</option>
+              </select></label>
+            <label class="field"><span>Стадия <b class="required">*</b></span>
+              <select class="input" name="stage">
+                <option value="">Выберите</option><option>Идея</option><option>Прототип</option>
+                <option>MVP</option><option>Первые продажи</option><option>Масштабирование</option>
+              </select></label>
+            <label class="field"><span>Кого ищете <b class="required">*</b></span>
+              <select class="input" name="seeking">
+                <option value="">Выберите</option>
+                <option>Команда / co-founder</option>
+                <option>Партнёрство</option>
+              </select></label>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="step-head"><span class="step-num">2</span><div><h2>Суть идеи</h2><p class="muted">Чем подробнее ответ, тем точнее карта проекта</p></div></div>
+          <div class="form-grid" id="idea-questions"></div>
+        </div>
+
+        <p class="form-error" id="idea-error" hidden></p>
+        <div class="actions">
+          <button class="btn secondary" type="button" data-back="projects">Отмена</button>
+          <button class="btn primary" type="submit">Сформировать карту проекта →</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="view-project" class="view" hidden>
+      <button class="back" type="button" data-back="projects">← Мои проекты</button>
+      <div id="project-detail"></div>
+    </section>
+
+    <section id="view-match" class="view" hidden>
+      <button class="back" type="button" id="match-back">← Карта проекта</button>
+      <div class="page-head">
+        <h1>ИИ-подбор партнёра</h1>
+        <p id="match-subtitle">SOBRA сопоставляет потребность проекта с опытом кандидатов и объясняет, почему человек подходит.</p>
+      </div>
+      <div id="match-list" class="list"></div>
+    </section>
+
+    <!-- ================= КАНДИДАТ ================= -->
+
+    <section id="view-search" class="view" hidden>
+      <div class="page-head">
+        <h1>Поиск проектов</h1>
+        <p>Найдите проект, которому нужны ваши опыт и навыки.</p>
+      </div>
+      <form id="search-form" class="card" novalidate>
+        <div class="form-grid">
+          <label class="field"><span>Цель <b class="required">*</b></span>
+            <select class="input" name="goal">
+              <option value="">Выберите</option>
+              <option value="team">Войти в команду</option>
+              <option value="partner">Партнёрство</option>
+            </select></label>
+          <label class="field"><span>Сфера</span>
+            <select class="input" name="category">
+              <option>Любая</option><option>AI</option><option>SaaS</option><option>FoodTech</option>
+              <option>FinTech</option><option>EdTech</option><option>E-commerce</option><option>Другое</option>
+            </select></label>
+          <label class="field"><span>Стадия не ниже</span>
+            <select class="input" name="min_stage">
+              <option>Идея</option><option>Прототип</option><option>MVP</option>
+              <option>Первые продажи</option><option>Масштабирование</option>
+            </select></label>
+        </div>
+        <p class="ai-hint" id="search-ai-hint"></p>
+        <p class="form-error" id="search-error" hidden></p>
+        <button class="btn primary block" type="submit">Найти проекты</button>
+      </form>
+      <div id="search-results" class="list"></div>
+    </section>
+
+    <section id="view-profile" class="view" hidden>
+      <div class="page-head">
+        <h1>Мой профиль</h1>
+        <p>Расскажите о себе. По этому тексту ИИ подбирает вам проекты, а основатели находят вас сами.</p>
+      </div>
+      <form id="profile-form" class="card" novalidate>
+        <div class="form-grid">
+          <div class="avatar-edit wide">
+            <span class="avatar xl" id="profile-avatar" aria-hidden="true">·</span>
+            <div class="grow">
+              <b>Фото профиля</b>
+              <p class="muted">Его видят основатели в подборе кандидатов и люди, с которыми у вас MATCH. Можно без фото.</p>
+              <div class="avatar-actions">
+                <label class="btn secondary small file-btn">
+                  <span id="avatar-label">Загрузить фото</span>
+                  <input class="visually-hidden" type="file" id="avatar-input" accept="image/*">
+                </label>
+                <button class="btn danger small" type="button" id="avatar-remove" hidden>Удалить фото</button>
+              </div>
+            </div>
+          </div>
+          <label class="field"><span>Фамилия <b class="required">*</b></span>
+            <input class="input" name="last_name" maxlength="80" placeholder="Иванов" autocomplete="family-name"></label>
+          <label class="field"><span>Имя <b class="required">*</b></span>
+            <input class="input" name="first_name" maxlength="80" placeholder="Иван" autocomplete="given-name"></label>
+          <label class="field"><span>Отчество</span>
+            <input class="input" name="patronymic" maxlength="80" placeholder="Иванович" autocomplete="additional-name"></label>
+          <label class="field"><span>E-mail <b class="required">*</b></span>
+            <input class="input" name="email" type="email" maxlength="200" placeholder="name@example.com" autocomplete="email"></label>
+          <label class="field"><span>Телефон <b class="required">*</b></span>
+            <input class="input" name="phone" type="tel" maxlength="18" placeholder="+7 (900) 123-45-67" inputmode="tel" autocomplete="tel"></label>
+          <label class="field"><span>Чего хотите <b class="required">*</b></span>
+            <select class="input" name="goal">
+              <option value="">Выберите</option>
+              <option value="team">Войти в команду</option>
+              <option value="partner">Партнёрство</option>
+            </select></label>
+          <label class="field"><span>Интересная сфера</span>
+            <select class="input" name="category">
+              <option>Любая</option><option>AI</option><option>SaaS</option><option>FoodTech</option>
+              <option>FinTech</option><option>EdTech</option><option>E-commerce</option><option>Другое</option>
+            </select></label>
+          <label class="field wide"><span>О себе <b class="required">*</b></span>
+            <textarea class="input textarea" name="about" maxlength="1500" placeholder="Опыт, навыки, сколько времени готовы уделять и какую роль хотите. Например: 4 года управлял рестораном, отвечал за персонал и поставщиков, готов уделять 30 часов в неделю"></textarea></label>
+          <label class="check wide">
+            <input type="checkbox" name="consent">
+            <span>Согласен(на), что мои ФИО, телефон и e-mail увидит только тот, с кем у меня случится MATCH — когда основатель примет отклик. До этого их не видит никто. <b class="required">*</b></span>
+          </label>
+          <label class="check wide">
+            <input type="checkbox" name="visible">
+            <span>Показывать мой профиль основателям, чтобы они могли пригласить меня в проект</span>
+          </label>
+        </div>
+        <p class="form-error" id="profile-error" hidden></p>
+        <div class="actions"><button class="btn primary" type="submit">Сохранить профиль</button></div>
+      </form>
+    </section>
+
+    <!-- ================= ОБЩЕЕ ================= -->
+
+    <section id="view-responses" class="view" hidden>
+      <div class="page-head"><h1>Отклики</h1><p>Входящие отклики на ваши проекты и приглашения от основателей.</p></div>
+      <h2 class="section">Отклики на мои проекты</h2>
+      <div id="offers-list" class="list"></div>
+      <h2 class="section">Меня пригласили</h2>
+      <div id="invites-list" class="list"></div>
+    </section>
+
+    <section id="view-contacts" class="view" hidden>
+      <div class="page-head"><h1>Контакты</h1><p>Люди, с которыми случился MATCH: отклик принят основателем.</p></div>
+      <h2 class="section">Мои кандидаты</h2>
+      <div id="contacts-list" class="list"></div>
+      <h2 class="section">Проекты, которые приняли меня</h2>
+      <div id="matches-list" class="list"></div>
+    </section>
+  </main>
+
+  <div class="nav-backdrop" id="nav-backdrop" hidden></div>
+  <nav class="tabbar" id="tabbar" aria-label="Разделы">
+    <p class="nav-title">Меню</p>
+    <button type="button" data-tab="projects" class="active">
+      <svg viewBox="0 0 24 24"><path d="M3 7h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Проекты</span></button>
+    <button type="button" data-tab="search">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Поиск</span></button>
+    <button type="button" data-tab="responses">
+      <svg viewBox="0 0 24 24"><path d="M4 4h16v12H7l-3 3z"/></svg><span>Отклики</span></button>
+    <button type="button" data-tab="contacts">
+      <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0M17 11a3 3 0 1 0 0-6M21 20a6 6 0 0 0-4-5.6"/></svg><span>Контакты</span></button>
+    <button type="button" data-tab="profile">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span>Профиль</span></button>
+    <div class="nav-cycle">
+      <p class="nav-title">Как работает SOBRA</p>
+      <ol>
+        <li><b>Idea Check</b> — ответы на вопросы</li>
+        <li><b>Project Map</b> — что проверено, что нет</li>
+        <li><b>Action Plan</b> — следующий шаг</li>
+        <li><b>Update</b> — результат двигает карту</li>
+        <li><b>AI Match</b> — человек с нужными навыками</li>
+      </ol>
+    </div>
+  </nav>
+
+  <!-- Панель отклика -->
+  <div class="sheet-backdrop" id="offer-sheet" hidden>
+    <form class="sheet" id="offer-form" novalidate>
+      <h2>Отклик на проект</h2>
+      <p class="muted" id="offer-project"></p>
+      <label class="field"><span>Что предлагаете</span>
+        <select class="input" name="type">
+          <option value="team">Присоединиться к команде</option>
+          <option value="partner">Партнёрство</option>
+        </select></label>
+      <label class="field"><span>Сообщение основателю</span>
+        <textarea class="input textarea" name="message" maxlength="1000" placeholder="Коротко о себе и почему вам интересен проект"></textarea></label>
+      <p class="form-error" id="offer-error" hidden></p>
+      <div class="actions">
+        <button type="button" class="btn secondary" id="offer-cancel">Отмена</button>
+        <button type="submit" class="btn primary">Отправить отклик</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

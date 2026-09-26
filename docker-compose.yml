@@ -1,12 +1,47 @@
 services:
   startup-discovery:
-    build: .
+    build: ./backend
     container_name: startup-discovery
     restart: unless-stopped
 
     environment:
       BOT_TOKEN: ${BOT_TOKEN}
       NODE_EXTRA_CA_CERTS: /usr/local/share/ca-certificates/russian_trusted_root_ca.crt
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      API_PORT: 3000
+      API_DEBUG_AUTH: ${API_DEBUG_AUTH:-false}
+      API_TEST_TOKEN_FOUNDER: ${API_TEST_TOKEN_FOUNDER:-}
+      API_TEST_TOKEN_CANDIDATE: ${API_TEST_TOKEN_CANDIDATE:-}
+      YANDEX_API_KEY: ${YANDEX_API_KEY:-}
+      YANDEX_FOLDER_ID: ${YANDEX_FOLDER_ID:-}
+
+    # API доступен только с самого сервера, наружу его отдаёт Nginx по HTTPS
+    ports:
+      - "127.0.0.1:3000:3000"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17
+    container_name: startup-discovery-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
 
     volumes:
-      - ./data:/app/data
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+volumes:
+  postgres_data:

@@ -1,0 +1,457 @@
+# DATA-API.yaml — описание автоматической проверки API решения SOBRA.
+#
+# Проверки выполняются по порядку: часть из них сохраняет значения из ответа
+# (блок save) и подставляет их в следующие запросы как {{имя}}.
+# Значения ${ИМЯ} берутся из переменных окружения (см. .env.example).
+#
+# Локальный прогон: python3 scripts/check_api.py DATA-API.yaml --env .env
+
+schema_version: "1.0"
+
+solution:
+  name: SOBRA
+  team: SOBRA  # идентификатор команды на платформе хакатона
+  description: >
+    Мини-приложение в MAX: основатель проверяет бизнес-идею (Idea Check),
+    получает карту проекта и план действий, обновляет карту результатами
+    проверок и через ИИ находит партнёра или co-founder'а. Кандидат ищет
+    проекты и откликается. Принятый отклик — MATCH и обмен контактами.
+
+base_url: https://158-160-202-57.nip.io/api
+
+defaults:
+  timeout_seconds: 30        # проверки с ИИ (YandexGPT) могут идти до 10–15 секунд
+  headers:
+    Content-Type: application/json
+  response_content_type: application/json
+
+# Роли тестовых учётных записей.
+# В MAX пользователь входит по подписанным данным MAX (Authorization: Bearer <initData>).
+# Для автоматической проверки выдаются токены: они открывают только
+# тестовые учётные записи с фиксированными id (test-data.sql).
+roles:
+  none:
+    description: Без авторизации
+    headers: {}
+  founder:
+    description: Основатель — создаёт проект, проходит Idea Check, план и Update, подбирает партнёра, принимает отклики
+    user_id: 910000000001
+    headers:
+      X-Test-Token: ${API_TEST_TOKEN_FOUNDER}
+  candidate:
+    description: Кандидат — заполняет профиль, ищет проекты, откликается
+    user_id: 910000000002
+    headers:
+      X-Test-Token: ${API_TEST_TOKEN_CANDIDATE}
+
+checks:
+
+  # ---------- Сервис ----------
+
+  - id: health
+    name: API и база данных доступны
+    required: true
+    method: GET
+    path: /health
+    role: none
+    expect:
+      status: [200]
+      body:
+        type: object
+        required: [status]
+        properties:
+          status: { const: ok }
+
+  - id: auth_required
+    name: Без авторизации данные недоступны
+    required: true
+    method: GET
+    path: /profile
+    role: none
+    expect:
+      status: [401]
+      body:
+        type: object
+        required: [error]
+
+  # ---------- Профили ----------
+
+  - id: candidate_profile_save
+    name: Кандидат заполняет профиль и даёт согласие на показ контактов после MATCH
+    required: true
+    method: PUT
+    path: /profile
+    role: candidate
+    body:
+      last_name: Тестов
+      first_name: Кандидат
+      email: candidate@test.sobra
+      phone: "+7 900 000-00-02"
+      goal: team
+      category: Любая
+      about: 4 года управлял кофейней — персонал, поставщики, закупки, смены. Готов уделять 30 часов в неделю, ищу роль операционного партнёра.
+      visible: true
+      consent: true
+    expect:
+      status: [200]
+      body:
+        type: object
+        required: [last_name, first_name, email, phone, goal, about, visible, consent]
+        properties:
+          phone: { const: "+79000000002" }
+          consent: { const: true }
+
+  - id: founder_profile_save
+    name: Основатель заполняет профиль
+    required: true
+    method: PUT
+    path: /profile
+    role: founder
+    body:
+      last_name: Тестов
+      first_name: Основатель
+      email: founder@test.sobra
+      phone: "+7 900 000-00-01"
+      goal: partner
+      category: Любая
+      about: Основатель тестового проекта — кофейня у дома.
+      visible: false
+      consent: true
+    expect:
+      status: [200]
+      body:
+        type: object
+        required: [last_name, first_name, consent]
+
+  - id: profile_without_consent_rejected
+    name: Без согласия профиль не сохраняется
+    required: true
+    method: PUT
+    path: /profile
+    role: candidate
+    body:
+      last_name: Тестов
+      first_name: Кандидат
+      email: candidate@test.sobra
+      phone: "+79000000002"
+      goal: team
+      about: Проверка без согласия
+      consent: false
+    expect:
+      status: [400]
+      body:
+        type: object
+        required: [error]
+
+  - id: profile_get
+    name: Кандидат получает свой профиль
+    required: true
+    method: GET
+    path: /profile
+    role: candidate
+    expect:
+      status: [200]
+      body:
+        type: object
+        required: [last_name, first_name, email, phone, goal, about, visible, consent, avatar_url]
+        properties:
+          consent: { const: true }
+
+  # ---------- Шаги 1–2: Idea Check и карта проекта ----------
+
+  - id: idea_check
+    name: Idea Check — ответы основателя превращаются в карту проекта и план действий
+    required: true
+    method: POST
+    path: /startups
+    role: founder
+    body:
+      name: Кофейня у дома (тест)
+      category: FoodTech
+      market_type: B2C
+      stage: Идея
+      seeking: Команда / co-founder
+      customer: Жители новых ЖК, которые утром спешат на работу
+      problem: Нет места взять хороший кофе по пути к метро
+      solution: Кофейня с окном выдачи у входа в ЖК, работает с 7 утра
+      partner_needed: Операционный партнёр — персонал, поставщики, смены
+      traction: Думаю, спрос будет большой
+    expect:
+      status: [201]
+      body:
+        type: object
+        required: [id, name, status, idea_map, readiness, tasks]
+        properties:
+          status: { const: draft }
+          readiness: { type: integer, minimum: 0, maximum: 100 }
+          idea_map:
+            type: object
+            required: [audience, problem, solution, competitors, demand, model, economics]
+          tasks:
+            type: array
+            min_items: 1
+            items:
+              type: object
+              required: [id, block_id, title, method, status]
+    save:
+      startup_id: $.id
+      task_id: $.tasks[0].id
+      task_block: $.tasks[0].block_id
+
+  - id: idea_check_validation
+    name: Idea Check не принимает пустые обязательные поля
+    required: true
+    method: POST
+    path: /startups
+    role: founder
+    body:
+      name: Без ответов
+      category: FoodTech
+      market_type: B2C
+      stage: Идея
+      seeking: Партнёрство
+    expect:
+      status: [400]
+      body:
+        type: object
+        required: [error]
+
+  - id: project_map_get
+    name: Карта проекта с планом действий
+    required: true
+    method: GET
+    path: /startups/{{startup_id}}
+    role: founder
+    expect:
+      status: [200]
+      body:
+        type: object
+        required: [id, idea_map, readiness, tasks]
+
+  - id: project_foreign_access
+    name: Чужой проект недоступен
+    required: true
+    method: GET
+    path: /startups/{{startup_id}}
+    role: candidate
+    expect:
+      status: [404]
+
+  # ---------- Шаги 3–4: Action Plan и Update ----------
+
+  - id: action_plan_update
+    name: Update — результат проверки дописывается в блок, карта пересчитывается
+    required: true
+    method: POST
+    path: /startups/{{startup_id}}/tasks/{{task_id}}/complete
+    role: founder
+    body:
+      result: Провели 12 интервью с жителями ЖК, 9 из 12 покупают кофе по пути к метро каждый день; лендинг — 300 посетителей, 24 заявки
+    expect:
+      status: [200]
+      body:
+        type: object
+        required: [startup, update]
+        properties:
+          update:
+            type: object
+            required: [block_id, status_before, status_after, readiness_before, readiness_after]
+            properties:
+              status_after: { enum: [confirmed, hypothesis, missing] }
+          startup:
+            type: object
+            required: [id, readiness, tasks]
+
+  - id: action_plan_update_repeat
+    name: Выполненную задачу нельзя закрыть повторно
+    required: true
+    method: POST
+    path: /startups/{{startup_id}}/tasks/{{task_id}}/complete
+    role: founder
+    body:
+      result: Повторный результат по той же задаче
+    expect:
+      status: [409]
+
+  # ---------- Шаг 5: AI Match ----------
+
+  - id: publish
+    name: Публикация проекта
+    required: true
+    method: POST
+    path: /startups/{{startup_id}}/publish
+    role: founder
+    expect:
+      status: [200]
+      body:
+        type: object
+        required: [id, status]
+        properties:
+          status: { const: published }
+
+  - id: ai_match_candidates
+    name: ИИ-подбор кандидатов под потребность проекта
+    required: true
+    method: GET
+    path: /startups/{{startup_id}}/candidates
+    role: founder
+    expect:
+      status: [200]
+      body:
+        type: object
+        required: [candidates, ai]
+        properties:
+          candidates:
+            type: array
+            min_items: 1
+            items:
+              type: object
+              required: [user_id, name, about, invited]
+
+  - id: invite_candidate
+    name: Основатель приглашает кандидата в проект
+    required: true
+    method: POST
+    path: /startups/{{startup_id}}/invite
+    role: founder
+    body:
+      user_id: 910000000002
+    expect:
+      status: [201]
+      body:
+        type: object
+        required: [id, startup_id, user_id]
+
+  - id: candidate_invites
+    name: Кандидат видит приглашение
+    required: true
+    method: GET
+    path: /invites
+    role: candidate
+    expect:
+      status: [200]
+      body:
+        type: object
+        required: [invites]
+        properties:
+          invites: { type: array, min_items: 1 }
+
+  - id: candidate_search
+    name: Кандидат ищет проекты с оценкой ИИ
+    required: true
+    method: POST
+    path: /search
+    role: candidate
+    body:
+      goal: team
+      category: Любая
+      min_stage: Идея
+    expect:
+      status: [200]
+      body:
+        type: object
+        required: [matches, ai]
+        properties:
+          matches:
+            type: array
+            min_items: 1
+            items:
+              type: object
+              required: [startup]
+
+  # ---------- Отклик и MATCH ----------
+
+  - id: offer_create
+    name: Кандидат откликается на проект
+    required: true
+    method: POST
+    path: /offers
+    role: candidate
+    body:
+      startup_id: "{{startup_id}}"
+      type: team
+      message: Управлял кофейней 4 года, готов взять операционку
+    expect:
+      status: [201]
+      body:
+        type: object
+        required: [id, startup_id, status]
+        properties:
+          status: { const: new }
+    save:
+      offer_id: $.id
+
+  - id: offers_received
+    name: Основатель видит отклик
+    required: true
+    method: GET
+    path: /offers/received
+    role: founder
+    expect:
+      status: [200]
+      body:
+        type: object
+        required: [offers]
+        properties:
+          offers: { type: array, min_items: 1 }
+
+  - id: offer_accept
+    name: Основатель принимает отклик — MATCH
+    required: true
+    method: POST
+    path: /offers/{{offer_id}}/accept
+    role: founder
+    expect:
+      status: [200]
+      body:
+        type: object
+        required: [id, status]
+        properties:
+          status: { const: accepted }
+
+  - id: offer_accept_foreign
+    name: Кандидат не может принять отклик за основателя
+    required: true
+    method: POST
+    path: /offers/{{offer_id}}/accept
+    role: candidate
+    expect:
+      status: [403]
+
+  - id: contacts_founder
+    name: После MATCH основатель видит контакты кандидата
+    required: true
+    method: GET
+    path: /contacts
+    role: founder
+    expect:
+      status: [200]
+      body:
+        type: object
+        required: [contacts]
+        properties:
+          contacts:
+            type: array
+            min_items: 1
+            items:
+              type: object
+              required: [candidate_name, candidate_phone, candidate_email, startup_name]
+
+  - id: contacts_candidate
+    name: После MATCH кандидат видит контакты основателя
+    required: true
+    method: GET
+    path: /matches
+    role: candidate
+    expect:
+      status: [200]
+      body:
+        type: object
+        required: [matches]
+        properties:
+          matches:
+            type: array
+            min_items: 1
+            items:
+              type: object
+              required: [startup_name, founder_name, founder_phone, founder_email]
