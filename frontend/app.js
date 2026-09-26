@@ -157,6 +157,43 @@ function dateText(value) {
   return value ? new Date(value).toLocaleDateString("ru-RU", { day: "numeric", month: "long" }) : "";
 }
 
+// Окно подтверждения в стиле приложения. В MAX на ПК мини-приложение работает внутри
+// движка браузера, и системный confirm() выглядит как окно браузера — поэтому свой диалог.
+// Возвращает Promise<boolean>.
+function confirmDialog(text, { title = "Подтвердите действие", ok = "Да", danger = true } = {}) {
+  return new Promise((resolve) => {
+    const sheet = $("confirm-sheet");
+    const okBtn = $("confirm-ok");
+    const cancelBtn = $("confirm-cancel");
+    $("confirm-title").textContent = title;
+    $("confirm-text").textContent = text;
+    okBtn.textContent = ok;
+    okBtn.className = `btn ${danger ? "danger" : "primary"}`;
+    const previousFocus = document.activeElement;
+    sheet.hidden = false;
+    cancelBtn.focus(); // по умолчанию безопасный вариант
+
+    const close = (result) => {
+      sheet.hidden = true;
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      sheet.removeEventListener("click", onBackdrop);
+      document.removeEventListener("keydown", onKey);
+      if (previousFocus && typeof previousFocus.focus === "function") previousFocus.focus();
+      resolve(result);
+    };
+    const onOk = () => close(true);
+    const onCancel = () => close(false);
+    const onBackdrop = (e) => { if (e.target === sheet) close(false); };
+    const onKey = (e) => { if (e.key === "Escape") close(false); };
+
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
+    sheet.addEventListener("click", onBackdrop);
+    document.addEventListener("keydown", onKey);
+  });
+}
+
 let toastTimer = null;
 function toast(message, kind = "ok") {
   const el = $("toast");
@@ -519,8 +556,8 @@ function setupIdeaForm() {
     show("idea");
   });
 
-  $("idea-draft-clear").addEventListener("click", () => {
-    if (!confirm("Очистить все ответы в форме?")) return;
+  $("idea-draft-clear").addEventListener("click", async () => {
+    if (!(await confirmDialog("Все ответы в форме будут удалены.", { title: "Очистить форму?", ok: "Очистить" }))) return;
     form.reset();
     draftClear(draftKey("idea-draft"));
     $("idea-draft-note").hidden = true;
@@ -773,9 +810,10 @@ function renderProject(s) {
       }
     });
     $("delete-project").addEventListener("click", async (e) => {
-      if (!confirm("Удалить черновик? Это действие нельзя отменить.")) return;
+      const button = e.currentTarget; // после await currentTarget уже пустой
+      if (!(await confirmDialog("Проект и его карта будут удалены. Это действие нельзя отменить.", { title: "Удалить черновик?", ok: "Удалить" }))) return;
       try {
-        await busy(e.currentTarget, "Удаляем…", () => api("DELETE", `/api/startups/${s.id}`));
+        await busy(button, "Удаляем…", () => api("DELETE", `/api/startups/${s.id}`));
         toast("Черновик удалён");
         show("projects");
       } catch (error) {
@@ -1278,9 +1316,10 @@ function setupAvatar() {
   });
 
   $("avatar-remove").addEventListener("click", async (e) => {
-    if (!confirm("Удалить фото профиля?")) return;
+    const button = e.currentTarget; // после await currentTarget уже пустой
+    if (!(await confirmDialog("Вместо фото будут показаны инициалы.", { title: "Удалить фото профиля?", ok: "Удалить" }))) return;
     try {
-      await busy(e.currentTarget, "Удаляем…", () => api("DELETE", "/api/profile/avatar"));
+      await busy(button, "Удаляем…", () => api("DELETE", "/api/profile/avatar"));
       state.profile = { ...(state.profile || {}), avatar_url: null };
       updateUserbox(state.profile);
       toast("Фото удалено");

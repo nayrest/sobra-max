@@ -304,6 +304,18 @@
     </form>
   </div>
 
+  <!-- Окно подтверждения в стиле приложения (вместо системного confirm браузера) -->
+  <div class="sheet-backdrop confirm-backdrop" id="confirm-sheet" hidden>
+    <div class="sheet confirm-sheet" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-text">
+      <h2 id="confirm-title">Подтвердите действие</h2>
+      <p class="muted" id="confirm-text"></p>
+      <div class="actions">
+        <button type="button" class="btn secondary" id="confirm-cancel">Отмена</button>
+        <button type="button" class="btn danger" id="confirm-ok">Да</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
   <script src="app.js"></script>
