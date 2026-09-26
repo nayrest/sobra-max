@@ -509,3 +509,22 @@ button.contact-link { border: 0; cursor: pointer; font: inherit; font-weight: 70
 .report-btn:hover { color: var(--red); }
 .card-foot { display: flex; justify-content: flex-end; margin-top: 8px; }
 .small-note { font-size: 12px; }
+
+/* ---------- Красные кружки с числом новых событий ---------- */
+
+.tab-icon { position: relative; display: inline-flex; }
+.tab-badge {
+  position: absolute; top: -6px; right: -10px;
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
+  display: grid; place-items: center;
+  background: #e5383b; color: #fff; font-size: 11px; font-weight: 800; line-height: 1;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 2px #fff;
+}
+
+/* В боковом меню на ПК кружок стоит в конце строки, а не поверх подписи */
+@media (min-width: 900px) {
+  .tabbar button { position: relative; }
+  .tabbar .tab-icon { position: static; }
+  .tabbar .tab-badge { top: 50%; right: 12px; transform: translateY(-50%); box-shadow: none; }
+}

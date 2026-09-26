@@ -246,8 +246,59 @@ function setupSideMenu() {
   reset();
 }
 
+// ======================================================
+// СЧЁТЧИКИ НОВЫХ СОБЫТИЙ
+// ======================================================
+
+const BADGE_SECTIONS = { responses: "badge-responses", contacts: "badge-contacts" };
+let counterTimer = null;
+
+function setBadge(section, count) {
+  const el = $(BADGE_SECTIONS[section]);
+  el.hidden = !count;
+  el.textContent = count > 99 ? "99+" : String(count || "");
+  const button = el.closest("button");
+  const title = button.querySelector("span:last-child").textContent;
+  if (count) button.setAttribute("aria-label", `${title}: новых ${count}`);
+  else button.removeAttribute("aria-label");
+}
+
+async function refreshCounters() {
+  if (!state.user || state.onboarding) return;
+  try {
+    const counters = await api("GET", "/api/counters");
+    // Вкладку, которая сейчас открыта, не подсвечиваем — пользователь и так её видит
+    for (const section of Object.keys(BADGE_SECTIONS)) {
+      const open = !$(`view-${section}`).hidden;
+      if (open && counters[section]) markSeen(section);
+      setBadge(section, open ? 0 : counters[section]);
+    }
+  } catch {
+    // счётчики не критичны — при ошибке просто не показываем
+  }
+}
+
+function markSeen(section) {
+  setBadge(section, 0);
+  api("POST", "/api/counters/seen", { section }).catch(() => {});
+}
+
+function startCounters() {
+  clearInterval(counterTimer);
+  refreshCounters();
+  counterTimer = setInterval(() => {
+    if (document.visibilityState === "visible") refreshCounters();
+  }, 60 * 1000);
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") refreshCounters();
+});
+
 function show(view) {
   if (!dockMq.matches) setNav(false);
+  if (BADGE_SECTIONS[view]) markSeen(view);
+  else refreshCounters();
   document.querySelectorAll(".view").forEach((v) => (v.hidden = true));
   $(`view-${view}`).hidden = false;
 
@@ -1323,7 +1374,10 @@ function setupProfileForm() {
             ? "Профиль сохранён. Основатели смогут вас пригласить."
             : "Профиль сохранён."
       );
-      if (wasOnboarding) show("projects");
+      if (wasOnboarding) {
+        show("projects");
+        startCounters();
+      }
     } catch (error) {
       formError("profile-error", error);
     }
@@ -1676,6 +1730,7 @@ async function authorize() {
 
     state.onboarding = false;
     show("projects");
+    startCounters();
   } catch (error) {
     showAuthError(
       error.status === 401

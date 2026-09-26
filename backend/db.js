@@ -720,8 +720,39 @@ async function countRecent(kind, userId) {
   return rows[0]?.n || 0;
 }
 
+// ======================================================
+// СЧЁТЧИКИ НОВЫХ СОБЫТИЙ (красные кружки на вкладках)
+// ======================================================
+
+// responses — новые отклики на мои проекты и новые приглашения мне;
+// contacts — новые MATCH: основатель принял мой отклик.
+// «Новое» — пришло после того, как пользователь последний раз открывал вкладку.
+async function getCounters(userId) {
+  const { rows } = await pool.query(
+    `SELECT
+       (SELECT COUNT(*)::int FROM offers o JOIN startups s ON s.id = o.startup_id
+          WHERE s.founder_id = $1 AND o.status = 'new'
+            AND o.created_at > COALESCE((SELECT seen_responses_at FROM users WHERE user_id = $1), 'epoch'::timestamptz))
+       + (SELECT COUNT(*)::int FROM invites i JOIN startups s ON s.id = i.startup_id
+          WHERE i.user_id = $1 AND s.status = 'published'
+            AND i.created_at > COALESCE((SELECT seen_responses_at FROM users WHERE user_id = $1), 'epoch'::timestamptz)) AS responses,
+       (SELECT COUNT(*)::int FROM offers o
+          WHERE o.sender_id = $1 AND o.status = 'accepted'
+            AND o.decided_at > COALESCE((SELECT seen_contacts_at FROM users WHERE user_id = $1), 'epoch'::timestamptz)) AS contacts`,
+    [userId]
+  );
+  return { responses: rows[0]?.responses || 0, contacts: rows[0]?.contacts || 0 };
+}
+
+async function markSeen(userId, section) {
+  const column = section === "contacts" ? "seen_contacts_at" : "seen_responses_at";
+  await pool.query(`UPDATE users SET ${column} = NOW() WHERE user_id = $1`, [userId]);
+}
+
 module.exports = {
   pool,
+  getCounters,
+  markSeen,
   saveVerifiedPhone,
   syncPhoneVerification,
   userExists,

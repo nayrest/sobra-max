@@ -942,6 +942,18 @@ function createApi({ notify = {} } = {}) {
     decideOffer(req, res, "rejected", notify.offerRejected)
   ));
 
+  // ---------- счётчики новых событий ----------
+
+  app.get("/api/counters", wrap(async (req, res) => {
+    res.json(await db.getCounters(req.user.userId));
+  }));
+
+  app.post("/api/counters/seen", wrap(async (req, res) => {
+    const section = requireOneOf(req.body?.section, ["responses", "contacts"], "section");
+    await db.markSeen(req.user.userId, section);
+    res.status(204).end();
+  }));
+
   // ---------- contacts (после MATCH) ----------
 
   app.get("/api/contacts", wrap(async (req, res) => {

@@ -199,3 +199,10 @@ CREATE TABLE IF NOT EXISTS reports (
 );
 
 CREATE INDEX IF NOT EXISTS idx_reports_target ON reports (target_type, target_id);
+
+-- ======================================================
+-- Счётчики новых событий на вкладках «Отклики» и «Контакты»
+-- ======================================================
+-- Когда пользователь последний раз открывал вкладку. Всё, что пришло позже, — «новое».
+ALTER TABLE users ADD COLUMN IF NOT EXISTS seen_responses_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS seen_contacts_at TIMESTAMPTZ;
