@@ -172,3 +172,30 @@ CREATE INDEX IF NOT EXISTS idx_ai_match_log_pair ON ai_match_log (startup_id, ca
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT;
 ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS max_link TEXT;
+
+-- ======================================================
+-- Безопасность: подтверждённый телефон, жалобы, лимиты
+-- ======================================================
+
+-- Телефон, подтверждённый через MAX (WebApp.requestContact, подпись проверяется на сервере).
+-- Если пользователь потом вписал другой номер, отметка снимается.
+ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS verified_phone TEXT;
+ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMPTZ;
+
+-- Когда основатель принял или отклонил отклик — для суточного лимита решений
+ALTER TABLE offers ADD COLUMN IF NOT EXISTS decided_at TIMESTAMPTZ;
+
+-- Жалобы. Проект или человек, на которого пожаловались 3 разных пользователя,
+-- скрывается из поиска и подбора до ручной проверки.
+CREATE TABLE IF NOT EXISTS reports (
+  id           SERIAL PRIMARY KEY,
+  reporter_id  BIGINT NOT NULL,
+  target_type  TEXT NOT NULL,          -- startup | user
+  target_id    BIGINT NOT NULL,
+  reason       TEXT NOT NULL,          -- money | fake | spam | rude | other
+  comment      TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (reporter_id, target_type, target_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_reports_target ON reports (target_type, target_id);

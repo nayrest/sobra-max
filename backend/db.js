@@ -22,6 +22,17 @@ const TEST_ID_MIN = 910000000000;
 const TEST_ID_MAX = 910000000999;
 const isTestUser = (id) => Number(id) >= TEST_ID_MIN && Number(id) <= TEST_ID_MAX;
 
+// Сколько разных людей должны пожаловаться, чтобы проект или человек скрылся из выдачи
+const REPORT_HIDE_THRESHOLD = 3;
+const NOT_HIDDEN_STARTUP = (alias) => `
+  (SELECT COUNT(DISTINCT r.reporter_id) FROM reports r
+    WHERE r.target_type = 'startup' AND r.target_id = ${alias}.id) < ${REPORT_HIDE_THRESHOLD}
+  AND (SELECT COUNT(DISTINCT r.reporter_id) FROM reports r
+    WHERE r.target_type = 'user' AND r.target_id = ${alias}.founder_id) < ${REPORT_HIDE_THRESHOLD}`;
+const NOT_HIDDEN_USER = (column) => `
+  (SELECT COUNT(DISTINCT r.reporter_id) FROM reports r
+    WHERE r.target_type = 'user' AND r.target_id = ${column}) < ${REPORT_HIDE_THRESHOLD}`;
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   // Пример DATABASE_URL:
@@ -130,7 +141,10 @@ async function getStartupById(startupId) {
 
 async function getPublishedStartupById(startupId) {
   const { rows } = await pool.query(
-    `SELECT * FROM startups WHERE id = $1 AND status = 'published'`,
+    `SELECT s.*, (sp.phone_verified_at IS NOT NULL) AS founder_verified
+     FROM startups s
+     LEFT JOIN search_profiles sp ON sp.user_id = s.founder_id
+     WHERE s.id = $1 AND s.status = 'published' AND ${NOT_HIDDEN_STARTUP("s")}`,
     [startupId]
   );
 
@@ -189,7 +203,11 @@ const wantedSeeking = {
 // Логика: в выдачу попадают только стартапы, совпавшие по всем критериям.
 async function findMatches(criteria, viewerId = null) {
   const { rows: startups } = await pool.query(
-    `SELECT * FROM startups WHERE status = 'published' ORDER BY id DESC`
+    `SELECT s.*, (sp.phone_verified_at IS NOT NULL) AS founder_verified
+     FROM startups s
+     LEFT JOIN search_profiles sp ON sp.user_id = s.founder_id
+     WHERE s.status = 'published' AND ${NOT_HIDDEN_STARTUP("s")}
+     ORDER BY s.id DESC`
   );
 
   const minimumStage = stageRanks[criteria.min_stage] || 1;
@@ -327,14 +345,15 @@ async function getOfferWithStartup(offerId) {
 
 async function updateOfferStatus(offerId, status) {
   await pool.query(
-    `UPDATE offers SET status = $1 WHERE id = $2`,
+    `UPDATE offers SET status = $1, decided_at = NOW() WHERE id = $2`,
     [status, offerId]
   );
 }
 
 async function getReceivedOffers(founderId) {
   const { rows } = await pool.query(
-    `SELECT offers.*, startups.name AS startup_name, sp.avatar_token AS sender_avatar
+    `SELECT offers.*, startups.name AS startup_name, sp.avatar_token AS sender_avatar,
+       (sp.phone_verified_at IS NOT NULL) AS sender_verified
      FROM offers
      JOIN startups ON startups.id = offers.startup_id
      LEFT JOIN search_profiles sp ON sp.user_id = offers.sender_id
@@ -359,6 +378,7 @@ async function getContactsForFounder(founderId) {
        CASE WHEN sp.contacts_consent_at IS NOT NULL THEN sp.phone END AS candidate_phone,
        CASE WHEN sp.contacts_consent_at IS NOT NULL THEN sp.email END AS candidate_email,
        sp.avatar_token AS candidate_avatar,
+       (sp.phone_verified_at IS NOT NULL) AS candidate_phone_verified,
        CASE WHEN sp.contacts_consent_at IS NOT NULL THEN
          COALESCE(sp.max_link, CASE WHEN cu.username IS NOT NULL THEN 'https://max.ru/' || cu.username END)
        END AS candidate_max_link,
@@ -396,6 +416,7 @@ async function getContactsForCandidate(senderId) {
        CASE WHEN sp.contacts_consent_at IS NOT NULL THEN sp.phone END AS founder_phone,
        CASE WHEN sp.contacts_consent_at IS NOT NULL THEN sp.email END AS founder_email,
        sp.avatar_token AS founder_avatar,
+       (sp.phone_verified_at IS NOT NULL) AS founder_phone_verified,
        CASE WHEN sp.contacts_consent_at IS NOT NULL THEN
          COALESCE(sp.max_link, CASE WHEN u.username IS NOT NULL THEN 'https://max.ru/' || u.username END)
        END AS founder_max_link
@@ -427,7 +448,8 @@ async function getCandidatesForStartup(startup, limit = 20) {
   const goal = SEEKING_TO_GOAL[startup.seeking];
 
   const { rows } = await pool.query(
-    `SELECT sp.user_id, sp.goal, sp.category, sp.about, sp.max_investment, sp.avatar_token, u.name
+    `SELECT sp.user_id, sp.goal, sp.category, sp.about, sp.max_investment, sp.avatar_token, u.name,
+       (sp.phone_verified_at IS NOT NULL) AS phone_verified
      FROM search_profiles sp
      LEFT JOIN users u ON u.user_id = sp.user_id
      WHERE sp.visible = TRUE
@@ -436,6 +458,7 @@ async function getCandidatesForStartup(startup, limit = 20) {
        AND ($2::text IS NULL OR sp.goal = $2)
        AND (sp.category IS NULL OR sp.category = 'Любая' OR sp.category = $3)
        AND ((sp.user_id BETWEEN $5 AND $6) = $7)
+       AND ${NOT_HIDDEN_USER("sp.user_id")}
      ORDER BY sp.created_at DESC
      LIMIT $4`,
     [startup.founder_id, goal || null, startup.category, limit, TEST_ID_MIN, TEST_ID_MAX, isTestUser(startup.founder_id)]
@@ -478,10 +501,12 @@ async function getInvitedUserIds(startupId) {
 // Приглашения, которые получил пользователь, по опубликованным проектам
 async function getInvitesForUser(userId) {
   const { rows } = await pool.query(
-    `SELECT i.id AS invite_id, i.created_at AS invited_at, s.*
+    `SELECT i.id AS invite_id, i.created_at AS invited_at, s.*,
+       (sp.phone_verified_at IS NOT NULL) AS founder_verified
      FROM invites i
      JOIN startups s ON s.id = i.startup_id
-     WHERE i.user_id = $1 AND s.status = 'published'
+     LEFT JOIN search_profiles sp ON sp.user_id = s.founder_id
+     WHERE i.user_id = $1 AND s.status = 'published' AND ${NOT_HIDDEN_STARTUP("s")}
      ORDER BY i.id DESC`,
     [userId]
   );
@@ -631,8 +656,78 @@ async function logAiMatches(rows) {
   );
 }
 
+// ======================================================
+// БЕЗОПАСНОСТЬ: подтверждённый телефон, жалобы, лимиты
+// ======================================================
+
+// Телефон подтверждён через MAX. Строки профиля может ещё не быть (первый вход).
+async function saveVerifiedPhone(userId, phone) {
+  await pool.query(
+    `INSERT INTO search_profiles (user_id, phone, verified_phone, phone_verified_at)
+     VALUES ($1, $2, $2, NOW())
+     ON CONFLICT (user_id) DO UPDATE SET
+       phone = EXCLUDED.phone, verified_phone = EXCLUDED.verified_phone, phone_verified_at = NOW()`,
+    [userId, phone]
+  );
+}
+
+// После сохранения профиля: отметка остаётся, только если номер совпадает с подтверждённым
+async function syncPhoneVerification(userId) {
+  await pool.query(
+    `UPDATE search_profiles SET phone_verified_at =
+       CASE WHEN verified_phone IS NOT NULL AND phone = verified_phone
+            THEN COALESCE(phone_verified_at, NOW()) ELSE NULL END
+     WHERE user_id = $1`,
+    [userId]
+  );
+}
+
+async function userExists(userId) {
+  const { rows } = await pool.query(`SELECT 1 FROM users WHERE user_id = $1`, [userId]);
+  return rows.length > 0;
+}
+
+// Возвращает { report, reporters } или null, если этот человек уже жаловался на эту цель
+async function createReport(reporterId, targetType, targetId, reason, comment) {
+  const { rows } = await pool.query(
+    `INSERT INTO reports (reporter_id, target_type, target_id, reason, comment)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (reporter_id, target_type, target_id) DO NOTHING
+     RETURNING *`,
+    [reporterId, targetType, targetId, reason, comment]
+  );
+  if (!rows[0]) return null;
+  const { rows: counted } = await pool.query(
+    `SELECT COUNT(DISTINCT reporter_id)::int AS n FROM reports WHERE target_type = $1 AND target_id = $2`,
+    [targetType, targetId]
+  );
+  return { report: rows[0], reporters: counted[0]?.n || 1, hidden: (counted[0]?.n || 1) >= REPORT_HIDE_THRESHOLD };
+}
+
+// Сколько действий пользователь сделал за последние сутки
+const RECENT_SQL = {
+  startups: `SELECT COUNT(*)::int AS n FROM startups WHERE founder_id = $1 AND created_at > NOW() - INTERVAL '1 day'`,
+  offers: `SELECT COUNT(*)::int AS n FROM offers WHERE sender_id = $1 AND created_at > NOW() - INTERVAL '1 day'`,
+  invites: `SELECT COUNT(*)::int AS n FROM invites i JOIN startups s ON s.id = i.startup_id
+            WHERE s.founder_id = $1 AND i.created_at > NOW() - INTERVAL '1 day'`,
+  decisions: `SELECT COUNT(*)::int AS n FROM offers o JOIN startups s ON s.id = o.startup_id
+              WHERE s.founder_id = $1 AND o.decided_at > NOW() - INTERVAL '1 day'`,
+  reports: `SELECT COUNT(*)::int AS n FROM reports WHERE reporter_id = $1 AND created_at > NOW() - INTERVAL '1 day'`,
+};
+
+async function countRecent(kind, userId) {
+  const { rows } = await pool.query(RECENT_SQL[kind], [userId]);
+  return rows[0]?.n || 0;
+}
+
 module.exports = {
   pool,
+  saveVerifiedPhone,
+  syncPhoneVerification,
+  userExists,
+  createReport,
+  countRecent,
+  REPORT_HIDE_THRESHOLD,
   logAiMatches,
   saveMaxLink,
   getUsername,

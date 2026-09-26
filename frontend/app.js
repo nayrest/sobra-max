@@ -131,6 +131,13 @@ function initialsOf(name) {
   );
 }
 
+// Отметка «телефон подтверждён через MAX»
+const verifiedBadge = (flag, text = "✓ Телефон подтверждён") => (flag ? badge(text, "green") : "");
+
+// Кнопка жалобы. type: startup | user
+const reportButton = (type, id, label) =>
+  `<button class="text-btn report-btn" type="button" data-report="${type}" data-target="${id}" data-label="${esc(label)}">⚑ Пожаловаться</button>`;
+
 // Кружок с фото или инициалами
 function avatarHtml(url, name, extra = "") {
   const inner = url ? `<img src="${esc(url)}" alt="" loading="lazy">` : esc(initialsOf(name));
@@ -827,7 +834,8 @@ async function loadCandidates(id) {
       <article class="card">
         <div class="person">
           ${avatarHtml(c.avatar_url, c.name)}
-          <div class="grow"><h3>${esc(c.name)}</h3><p class="muted">${esc(GOALS[c.goal] || "")}</p></div>
+          <div class="grow"><h3>${esc(c.name)}</h3><p class="muted">${esc(GOALS[c.goal] || "")}</p>
+            <div class="chips">${verifiedBadge(c.phone_verified)}</div></div>
         </div>
         <p class="answer">${esc(c.about)}</p>
         ${renderAi(c.ai)}
@@ -836,6 +844,7 @@ async function loadCandidates(id) {
             ? `<button class="btn secondary" type="button" disabled>Приглашение отправлено ✓</button>`
             : `<button class="btn primary" type="button" data-invite="${c.user_id}">Пригласить в проект</button>`}
         </div>
+        <div class="card-foot">${reportButton("user", c.user_id, c.name)}</div>
       </article>`).join("");
   } catch (error) {
     failed(list, error, () => loadCandidates(id));
@@ -1032,6 +1041,101 @@ function updateUserbox(p) {
 }
 
 // ======================================================
+// ПОДТВЕРЖДЕНИЕ ТЕЛЕФОНА ЧЕРЕЗ MAX
+// ======================================================
+// WebApp.requestContact() отдаёт номер, привязанный к аккаунту MAX, с подписью.
+// Сервер проверяет подпись ключом бота, после этого номер отмечается как подтверждённый.
+
+const canRequestContact = () => Boolean(WebApp && typeof WebApp.requestContact === "function");
+
+function updatePhoneStatus() {
+  const input = $("profile-form").elements.phone;
+  const verified = Boolean(state.verifiedPhone) && formatRuPhone(input.value) === state.verifiedPhone;
+  $("phone-verified").hidden = !verified;
+  $("phone-verify").hidden = verified || !canRequestContact();
+}
+
+function setupPhoneVerification() {
+  const input = $("profile-form").elements.phone;
+  input.addEventListener("input", updatePhoneStatus);
+
+  $("phone-verify").addEventListener("click", async (e) => {
+    const button = e.currentTarget;
+    try {
+      const contact = await busy(button, "Ждём подтверждения в MAX…", () => WebApp.requestContact());
+      if (!contact || contact.error || !contact.phone) {
+        const code = contact?.error?.code || "";
+        toast(code.includes("refused") ? "Вы не поделились номером — можно подтвердить позже" : "MAX не передал номер. Попробуйте ещё раз.", "error");
+        return;
+      }
+      const result = await api("POST", "/api/profile/phone", {
+        phone: contact.phone,
+        authDate: contact.authDate,
+        hash: contact.hash,
+      });
+      input.value = formatRuPhone(result.phone);
+      state.verifiedPhone = formatRuPhone(result.phone);
+      state.profile = { ...(state.profile || {}), phone: result.phone, phone_verified: true };
+      updatePhoneStatus();
+      toast("Номер подтверждён через MAX ✓");
+    } catch (error) {
+      const code = error?.error?.code || error?.code || "";
+      toast(String(code).includes("refused") ? "Вы не поделились номером — можно подтвердить позже" : error.message || "Не удалось подтвердить номер", "error");
+    }
+  });
+}
+
+// ======================================================
+// ЖАЛОБЫ
+// ======================================================
+
+function setupReports() {
+  const sheet = $("report-sheet");
+  const form = $("report-form");
+  let target = null;
+
+  const close = () => {
+    sheet.hidden = true;
+    target = null;
+  };
+
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-report]");
+    if (!button) return;
+    target = { type: button.dataset.report, id: Number(button.dataset.target) };
+    form.reset();
+    formError("report-error", null);
+    $("report-target").textContent = (target.type === "startup" ? "Проект: " : "Пользователь: ") + (button.dataset.label || "");
+    sheet.hidden = false;
+  });
+
+  $("report-cancel").addEventListener("click", close);
+  sheet.addEventListener("click", (e) => {
+    if (e.target === sheet) close();
+  });
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!target) return;
+    const button = form.querySelector("button[type=submit]");
+    try {
+      const result = await busy(button, "Отправляем…", () =>
+        api("POST", "/api/reports", {
+          target_type: target.type,
+          target_id: target.id,
+          reason: form.elements.reason.value,
+          comment: form.elements.comment.value.trim(),
+        })
+      );
+      close();
+      toast(result.hidden ? "Спасибо. После нескольких жалоб мы скрыли это из поиска до проверки." : "Спасибо, жалоба отправлена");
+    } catch (error) {
+      formError("report-error", error);
+    }
+  });
+}
+
+// ======================================================
 // АВАТАРКА
 // ======================================================
 
@@ -1129,6 +1233,8 @@ async function loadProfile() {
     form.elements.visible.checked = p.visible;
     form.elements.consent.checked = Boolean(p.consent);
     form.elements.max_link.value = p.max_link || "";
+    state.verifiedPhone = p.phone_verified ? formatRuPhone(p.phone) : null;
+    updatePhoneStatus();
     $("max-link-hint").textContent = p.max_username
       ? `Необязательно: у вас в MAX есть ник @${p.max_username}, ссылка https://max.ru/${p.max_username} подставится сама. Заполните, только если хотите указать другую.`
       : "Необязательно. Нужна для кнопки «Написать в MAX» после MATCH. В MAX: профиль → QR-код → «Поделиться».";
@@ -1304,11 +1410,13 @@ function projectForCandidate(s, ai) {
       </div>
     </div>
     <p class="muted">Ищет: ${esc(seekingText(s))}</p>
+    ${s.founder_verified ? `<div class="chips">${verifiedBadge(true, "✓ Основатель подтвердил телефон")}</div>` : ""}
     ${rows.map(([k, v]) => `<p class="answer"><b>${k}.</b> ${esc(v)}</p>`).join("")}
     ${renderAi(ai, "Почему вы подходите")}
     ${isOwn
       ? `<p class="muted">Это ваш проект</p>`
-      : `<button class="btn primary block" type="button" data-respond="${s.id}" data-name="${esc(s.name)}">Откликнуться</button>`}
+      : `<button class="btn primary block" type="button" data-respond="${s.id}" data-name="${esc(s.name)}">Откликнуться</button>
+         <div class="card-foot">${reportButton("startup", s.id, s.name)}</div>`}
   </article>`;
 }
 
@@ -1393,11 +1501,13 @@ async function loadResponses() {
           <h3>${esc(o.startup_name)}</h3>
           <div class="person small">${avatarHtml(o.sender_avatar_url, o.sender_name)}
             <p class="muted">От: ${esc(o.sender_name || "пользователь MAX")} · ${dateText(o.created_at)}</p></div>
+          ${o.sender_verified ? `<div class="chips">${verifiedBadge(true)}</div>` : ""}
           <p class="answer">${esc(o.message)}</p>
           ${o.status === "new" ? `<div class="actions">
             <button class="btn secondary small" type="button" data-decide="reject" data-id="${o.id}">Отклонить</button>
             <button class="btn primary small" type="button" data-decide="accept" data-id="${o.id}">Принять</button>
           </div>` : ""}
+          <div class="card-foot">${reportButton("user", o.sender_id, o.sender_name || "пользователь MAX")}</div>
         </article>`;
       }).join("");
     }
@@ -1476,9 +1586,11 @@ async function loadContacts() {
         <div class="chips">${badge("MATCH", "green")} ${badge(c.type, "gray")}</div>
         <div class="person">${avatarHtml(c.candidate_avatar_url, c.candidate_name)}
           <div class="grow"><h3>${esc(c.candidate_name || "Пользователь MAX")}</h3>
-          <p class="muted">Проект: ${esc(c.startup_name)} · ${dateText(c.created_at)}</p></div></div>
+          <p class="muted">Проект: ${esc(c.startup_name)} · ${dateText(c.created_at)}</p>
+          <div class="chips">${verifiedBadge(c.candidate_phone_verified)}</div></div></div>
         ${contactLinks(c.candidate_phone, c.candidate_email, c.candidate_max_link)}
         <p class="answer">${esc(c.message)}</p>
+        <div class="card-foot">${reportButton("user", c.candidate_id, c.candidate_name || "пользователь MAX")}</div>
       </article>`).join("");
 
     if (matches.length === 0) empty(matchesEl, "Здесь появятся проекты, основатели которых приняли ваш отклик.");
@@ -1487,8 +1599,10 @@ async function loadContacts() {
         <h3>${esc(m.startup_name)}</h3>
         <div class="person small">${avatarHtml(m.founder_avatar_url, m.founder_name)}
           <p class="muted">Основатель: ${esc(m.founder_name || "пользователь MAX")} · ${dateText(m.created_at)}</p></div>
+        ${m.founder_phone_verified ? `<div class="chips">${verifiedBadge(true)}</div>` : ""}
         ${contactLinks(m.founder_phone, m.founder_email, m.founder_max_link)}
         <p class="answer"><b>Ваш отклик.</b> ${esc(m.message)}</p>
+        <div class="card-foot">${reportButton("user", m.founder_id, m.founder_name || "основатель")} ${reportButton("startup", m.startup_id, m.startup_name)}</div>
       </article>`).join("");
   } catch (error) {
     failed(contactsEl, error, loadContacts);
@@ -1579,6 +1693,8 @@ document.addEventListener("DOMContentLoaded", () => {
   setupIdeaForm();
   setupProfileForm();
   setupAvatar();
+  setupPhoneVerification();
+  setupReports();
   setupSearchForm();
   setupOfferForm();
 

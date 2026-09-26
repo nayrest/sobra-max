@@ -173,8 +173,10 @@
             <input class="input" name="patronymic" maxlength="80" placeholder="Иванович" autocomplete="additional-name"></label>
           <label class="field"><span>E-mail <b class="required">*</b></span>
             <input class="input" name="email" type="email" maxlength="200" placeholder="name@example.com" autocomplete="email"></label>
-          <label class="field"><span>Телефон <b class="required">*</b></span>
-            <input class="input" name="phone" type="tel" maxlength="18" placeholder="+7 (900) 123-45-67" inputmode="tel" autocomplete="tel"></label>
+          <div class="field phone-field"><label for="profile-phone">Телефон <b class="required">*</b></label>
+            <input class="input" id="profile-phone" name="phone" type="tel" maxlength="18" placeholder="+7 (900) 123-45-67" inputmode="tel" autocomplete="tel">
+            <span class="phone-status verified" id="phone-verified" hidden>✓ Подтверждён через MAX</span>
+            <button class="text-btn" type="button" id="phone-verify" hidden>✓ Подтвердить номер через MAX</button></div>
           <label class="field"><span>Ссылка на профиль в MAX</span>
             <input class="input" name="max_link" maxlength="300" placeholder="https://max.ru/ваш_ник" inputmode="url" autocomplete="url">
             <small class="field-hint" id="max-link-hint">Необязательно. Нужна для кнопки «Написать в MAX» после MATCH. В MAX: профиль → QR-код → «Поделиться».</small></label>
@@ -209,6 +211,9 @@
 
     <section id="view-responses" class="view" hidden>
       <div class="page-head"><h1>Отклики</h1><p>Входящие отклики на ваши проекты и приглашения от основателей.</p></div>
+      <div class="safety-note">
+        <b>🛡 Осторожно с мошенниками.</b> SOBRA никогда не берёт деньги за знакомство. Не переводите деньги «за вход в команду» или «за участие», не сообщайте коды из SMS и пароли. Если собеседник просит об этом — нажмите «Пожаловаться».
+      </div>
       <h2 class="section">Отклики на мои проекты</h2>
       <div id="offers-list" class="list"></div>
       <h2 class="section">Меня пригласили</h2>
@@ -217,6 +222,9 @@
 
     <section id="view-contacts" class="view" hidden>
       <div class="page-head"><h1>Контакты</h1><p>Люди, с которыми случился MATCH: отклик принят основателем.</p></div>
+      <div class="safety-note">
+        <b>🛡 Осторожно с мошенниками.</b> SOBRA никогда не берёт деньги за знакомство. Не переводите деньги «за вход в команду» или «за участие», не сообщайте коды из SMS и пароли. Если собеседник просит об этом — нажмите «Пожаловаться».
+      </div>
       <h2 class="section">Мои кандидаты</h2>
       <div id="contacts-list" class="list"></div>
       <h2 class="section">Проекты, которые приняли меня</h2>
@@ -265,6 +273,30 @@
       <div class="actions">
         <button type="button" class="btn secondary" id="offer-cancel">Отмена</button>
         <button type="submit" class="btn primary">Отправить отклик</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Панель жалобы -->
+  <div class="sheet-backdrop" id="report-sheet" hidden>
+    <form class="sheet" id="report-form" novalidate>
+      <h2>Пожаловаться</h2>
+      <p class="muted" id="report-target"></p>
+      <label class="field"><span>Что случилось</span>
+        <select class="input" name="reason">
+          <option value="money">Просит деньги или предоплату</option>
+          <option value="fake">Фейк или выдаёт себя за другого</option>
+          <option value="spam">Спам или реклама</option>
+          <option value="rude">Оскорбления</option>
+          <option value="other">Другое</option>
+        </select></label>
+      <label class="field"><span>Подробности (необязательно)</span>
+        <textarea class="input textarea" name="comment" maxlength="500" placeholder="Что именно произошло"></textarea></label>
+      <p class="muted small-note">Жалобы анонимны. Если на проект или человека пожалуются несколько пользователей, он скрывается из поиска до проверки.</p>
+      <p class="form-error" id="report-error" hidden></p>
+      <div class="actions">
+        <button type="button" class="btn secondary" id="report-cancel">Отмена</button>
+        <button type="submit" class="btn danger">Отправить жалобу</button>
       </div>
     </form>
   </div>

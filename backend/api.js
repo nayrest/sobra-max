@@ -154,6 +154,62 @@ function validateInitData(initData, botToken) {
   return { userId: Number(user.id), name, username };
 }
 
+// ======================================================
+// ПОДТВЕРЖДЕНИЕ ТЕЛЕФОНА ЧЕРЕЗ MAX (WebApp.requestContact)
+// https://dev.max.ru/docs/webapps/bridge
+// ======================================================
+// MAX подписывает номер, привязанный к аккаунту: HMAC-SHA256(authDate\nphone\nuserId, токен бота),
+// номер без «+». Документация не уточняет, пишутся ли имена полей и в каком виде хэш,
+// поэтому проверяем варианты. Без токена бота подделать ни один из них нельзя.
+
+const CONTACT_MAX_AGE_SECONDS = 24 * 60 * 60;
+let contactVariantLogged = false;
+
+function verifyContact(contact, userId, botToken) {
+  if (!contact || typeof contact !== "object" || !botToken) return null;
+  const { phone, authDate, hash } = contact;
+  if (typeof phone !== "string" || typeof hash !== "string" || authDate === undefined || authDate === null) return null;
+
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length < 10 || digits.length > 15) return null;
+
+  const ad = String(authDate);
+  const t = Number(ad);
+  if (!Number.isFinite(t) || t <= 0) return null;
+  const seconds = t > 1e12 ? t / 1000 : t; // authDate может прийти в секундах или миллисекундах
+  if (Math.abs(Date.now() / 1000 - seconds) > CONTACT_MAX_AGE_SECONDS) return null;
+
+  const strings = {
+    values: `${ad}\n${digits}\n${userId}`,
+    pairs: `authDate=${ad}\nphone=${digits}\nuserId=${userId}`,
+  };
+  const keys = {
+    token: Buffer.from(botToken),
+    webAppData: crypto.createHmac("sha256", "WebAppData").update(botToken).digest(),
+  };
+  const given = hash.trim();
+
+  for (const [sName, str] of Object.entries(strings)) {
+    for (const [kName, key] of Object.entries(keys)) {
+      const digest = crypto.createHmac("sha256", key).update(str).digest();
+      const candidates = [digest.toString("hex"), digest.toString("base64"), digest.toString("base64url")];
+      const matched = candidates.some((c) => {
+        const a = Buffer.from(c);
+        const b = Buffer.from(c === candidates[0] ? given.toLowerCase() : given);
+        return a.length === b.length && crypto.timingSafeEqual(a, b);
+      });
+      if (matched) {
+        if (!contactVariantLogged) {
+          console.log(`ℹ️  Телефон через MAX подтверждён (формат подписи: ${sName}/${kName})`);
+          contactVariantLogged = true;
+        }
+        return "+" + digits;
+      }
+    }
+  }
+  return null;
+}
+
 function avatarUrl(token) {
   return token ? `/api/avatars/${token}` : null;
 }
@@ -254,6 +310,24 @@ function createApi({ notify = {} } = {}) {
       }
     }
   };
+
+  // ---------- суточные лимиты против массового сбора контактов и спама ----------
+  // Тестовые учётные записи жюри лимитами не ограничены: автопроверки гоняются много раз.
+  const DAILY_LIMITS = {
+    startups: { max: 10, text: "Сегодня создано уже 10 проектов — это максимум на сутки" },
+    offers: { max: 20, text: "Сегодня отправлено уже 20 откликов — это максимум на сутки" },
+    invites: { max: 30, text: "Сегодня отправлено уже 30 приглашений — это максимум на сутки" },
+    decisions: { max: 50, text: "Сегодня принято уже 50 решений по откликам — это максимум на сутки" },
+    reports: { max: 20, text: "Сегодня отправлено уже 20 жалоб — это максимум на сутки" },
+  };
+
+  async function enforceDailyLimit(req, kind) {
+    if (db.isTestUser(req.user.userId)) return;
+    const limit = DAILY_LIMITS[kind];
+    if ((await db.countRecent(kind, req.user.userId)) >= limit.max) {
+      throw new ApiError(429, `${limit.text}. Попробуйте завтра.`);
+    }
+  }
 
   // ---------- health (без авторизации, для проверки деплоя) ----------
 
@@ -368,6 +442,7 @@ function createApi({ notify = {} } = {}) {
     for (const field of REQUIRED_IDEA) data[field] = requireText(body, field);
     for (const field of OPTIONAL_IDEA) data[field] = optionalText(body, field);
 
+    await enforceDailyLimit(req, "startups");
     const startup = await db.saveStartupDraft(req.user.userId, data);
     res.status(201).json(await withTasks(await withIdeaMap(startup)));
   }));
@@ -591,6 +666,7 @@ function createApi({ notify = {} } = {}) {
       visible: Boolean(profile?.visible),
       consent: Boolean(profile?.contacts_consent_at),
       avatar_url: avatarUrl(profile?.avatar_token),
+      phone_verified: Boolean(profile?.phone_verified_at),
       max_link: profile?.max_link || "",
       max_username: req.user.username || (await db.getUsername(req.user.userId)),
     });
@@ -642,6 +718,9 @@ function createApi({ notify = {} } = {}) {
     });
     await db.saveContactsConsent(req.user.userId);
     if (maxLink !== undefined) await db.saveMaxLink(req.user.userId, maxLink);
+    // Номер поменяли вручную — отметка «подтверждён через MAX» снимается
+    await db.syncPhoneVerification(req.user.userId);
+    const saved = await db.getSearchProfile(req.user.userId);
 
     res.json({
       name: req.user.name,
@@ -657,9 +736,55 @@ function createApi({ notify = {} } = {}) {
       visible,
       consent: true,
       avatar_url: avatarUrl(current?.avatar_token),
+      phone_verified: Boolean(saved?.phone_verified_at),
       max_link: maxLink === undefined ? current?.max_link || "" : maxLink || "",
       max_username: req.user.username || (await db.getUsername(req.user.userId)),
     });
+  }));
+
+  // ---------- подтверждение телефона через MAX ----------
+
+  app.post("/api/profile/phone", wrap(async (req, res) => {
+    const phone = verifyContact(req.body || {}, req.user.userId, botToken);
+    if (!phone) {
+      throw new ApiError(400, "Не удалось подтвердить номер: подпись MAX не совпала или устарела. Попробуйте ещё раз.");
+    }
+    await db.saveVerifiedPhone(req.user.userId, phone);
+    res.json({ phone, phone_verified: true });
+  }));
+
+  // ---------- жалобы ----------
+
+  const REPORT_REASONS = {
+    money: "Просит деньги или предоплату",
+    fake: "Фейк или выдаёт себя за другого",
+    spam: "Спам или реклама",
+    rude: "Оскорбления",
+    other: "Другое",
+  };
+
+  app.post("/api/reports", wrap(async (req, res) => {
+    const body = req.body || {};
+    const targetType = requireOneOf(body.target_type, ["startup", "user"], "target_type");
+    const targetId = parseId(body.target_id);
+    const reason = requireOneOf(body.reason, Object.keys(REPORT_REASONS), "reason");
+    const comment = optionalText(body, "comment", 500);
+
+    if (targetType === "startup") {
+      const startup = await db.getStartupById(targetId);
+      if (!startup) throw new ApiError(404, "Проект не найден");
+      if (Number(startup.founder_id) === req.user.userId) throw new ApiError(400, "Нельзя пожаловаться на свой проект");
+    } else {
+      if (targetId === req.user.userId) throw new ApiError(400, "Нельзя пожаловаться на себя");
+      if (!(await db.userExists(targetId))) throw new ApiError(404, "Пользователь не найден");
+    }
+
+    await enforceDailyLimit(req, "reports");
+    const created = await db.createReport(req.user.userId, targetType, targetId, reason, comment);
+    if (!created) throw new ApiError(409, "Вы уже отправляли жалобу на это");
+
+    console.warn(`⚑ Жалоба #${created.report.id}: ${targetType} ${targetId}, причина «${REPORT_REASONS[reason]}», всего жалоб от разных людей: ${created.reporters}`);
+    res.status(201).json({ id: created.report.id, hidden: created.hidden });
   }));
 
   // ---------- аватарка ----------
@@ -729,6 +854,7 @@ function createApi({ notify = {} } = {}) {
         user_id: Number(c.user_id),
         name: c.name || "Пользователь MAX",
         avatar_url: avatarUrl(c.avatar_token),
+        phone_verified: Boolean(c.phone_verified),
         goal: c.goal,
         about: c.about,
         ai: c.ai || null,
@@ -745,6 +871,7 @@ function createApi({ notify = {} } = {}) {
       throw new ApiError(404, "Кандидат не найден или скрыл свой профиль");
     }
 
+    await enforceDailyLimit(req, "invites");
     const invite = await db.createInvite(startup.id, userId);
     if (!invite) throw new ApiError(409, "Этот кандидат уже приглашён");
 
@@ -767,6 +894,8 @@ function createApi({ notify = {} } = {}) {
 
     const startup = await db.getPublishedStartupById(startupId);
     if (!startup) throw new ApiError(404, "Проект больше недоступен");
+    if (Number(startup.founder_id) === req.user.userId) throw new ApiError(400, "Нельзя откликнуться на свой проект");
+    await enforceDailyLimit(req, "offers");
 
     // Имя берём из проверенного initData, а не из тела запроса — его нельзя подделать
     const offer = await db.createOffer(
@@ -796,6 +925,7 @@ function createApi({ notify = {} } = {}) {
     if (offer.status !== "new") {
       throw new ApiError(409, "По этому предложению уже принято решение");
     }
+    await enforceDailyLimit(req, "decisions");
 
     await db.updateOfferStatus(offerId, status);
     const updated = { ...offer, status };

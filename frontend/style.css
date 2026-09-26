@@ -494,3 +494,18 @@ button.contact-link { border: 0; cursor: pointer; font: inherit; font-weight: 70
   background: var(--green-bg); color: var(--green); font-size: 13px; font-weight: 600;
 }
 .draft-note .text-btn { color: var(--ink-soft); font-size: 13px; }
+
+/* ---------- Безопасность: подтверждённый телефон, предупреждение, жалобы ---------- */
+
+.safety-note {
+  margin: 0 0 14px; padding: 12px 14px; border-radius: 12px;
+  background: var(--amber-bg); color: #7a5208; font-size: 13px; line-height: 1.45;
+}
+.phone-field > label { font-weight: 700; color: #1d2f5e; font-size: 14px; }
+.phone-status { font-size: 12px; font-weight: 700; }
+.phone-status.verified { color: var(--green); }
+.phone-field .text-btn { font-size: 13px; align-self: flex-start; }
+.report-btn { font-size: 12px; font-weight: 700; color: var(--muted); }
+.report-btn:hover { color: var(--red); }
+.card-foot { display: flex; justify-content: flex-end; margin-top: 8px; }
+.small-note { font-size: 12px; }
