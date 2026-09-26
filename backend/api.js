@@ -210,6 +210,54 @@ function verifyContact(contact, userId, botToken) {
   return null;
 }
 
+// ======================================================
+// СОБЫТИЯ В РЕАЛЬНОМ ВРЕМЕНИ (Server-Sent Events)
+// ======================================================
+// Мини-приложение держит открытое соединение GET /api/events. Когда пользователю приходит
+// отклик, приглашение или MATCH, сервер шлёт событие, и приложение сразу обновляет счётчики.
+// EventSource не умеет передавать заголовок авторизации, поэтому соединение открывается
+// по короткоживущему пропуску, который выдаёт авторизованный метод /api/events/ticket.
+
+const EVENT_TICKET_TTL_SECONDS = 5 * 60;
+const EVENT_HEARTBEAT_MS = 20 * 1000; // меньше proxy_read_timeout в Nginx (30 с)
+const EVENT_MAX_STREAMS_PER_USER = 5;
+
+const eventStreams = new Map(); // userId -> Set(res)
+
+function ticketKey(botToken) {
+  return crypto.createHash("sha256").update(`sobra-events:${botToken || ""}`).digest();
+}
+
+function createEventTicket(userId, botToken) {
+  const exp = Math.floor(Date.now() / 1000) + EVENT_TICKET_TTL_SECONDS;
+  const payload = `${userId}.${exp}`;
+  const sig = crypto.createHmac("sha256", ticketKey(botToken)).update(payload).digest("hex");
+  return `${payload}.${sig}`;
+}
+
+function readEventTicket(ticket, botToken) {
+  const match = typeof ticket === "string" && ticket.match(/^(\d{1,20})\.(\d{1,12})\.([a-f0-9]{64})$/);
+  if (!match) return null;
+  const [, userId, exp, sig] = match;
+  if (Number(exp) < Date.now() / 1000) return null;
+  const expected = crypto.createHmac("sha256", ticketKey(botToken)).update(`${userId}.${exp}`).digest("hex");
+  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+  return Number(userId);
+}
+
+// Сообщить пользователю (всем его открытым вкладкам), что счётчики изменились
+function publishEvent(userId, type = "counters") {
+  const streams = eventStreams.get(Number(userId));
+  if (!streams) return;
+  for (const res of streams) {
+    try {
+      res.write(`event: ${type}\ndata: {}\n\n`);
+    } catch {
+      // соединение уже закрыто — уберётся в обработчике close
+    }
+  }
+}
+
 function avatarUrl(token) {
   return token ? `/api/avatars/${token}` : null;
 }
@@ -353,6 +401,47 @@ function createApi({ notify = {} } = {}) {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.end(avatar.data);
   }));
+
+  // ---------- события в реальном времени (без заголовка авторизации — по пропуску) ----------
+
+  app.get("/api/events", (req, res) => {
+    const url = new URL(req.url, "http://local");
+    const userId = readEventTicket(url.searchParams.get("ticket"), botToken);
+    if (!userId) {
+      res.status(401).json({ error: "Пропуск для событий устарел или неверен" });
+      return;
+    }
+
+    const streams = eventStreams.get(userId) || new Set();
+    if (streams.size >= EVENT_MAX_STREAMS_PER_USER) {
+      // Старое соединение закрываем, новое принимаем (например, переоткрыли приложение)
+      const oldest = streams.values().next().value;
+      streams.delete(oldest);
+      try { oldest.end(); } catch { /* уже закрыто */ }
+    }
+
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no"); // Nginx не будет копить ответ в буфере
+    if (typeof res.flushHeaders === "function") res.flushHeaders();
+    res.write(`retry: 5000\nevent: ready\ndata: {}\n\n`);
+
+    streams.add(res);
+    eventStreams.set(userId, streams);
+
+    const heartbeat = setInterval(() => {
+      try { res.write(": ping\n\n"); } catch { /* закрыто */ }
+    }, EVENT_HEARTBEAT_MS);
+
+    // Именно res, а не req: у запроса «close» в Node срабатывает сразу после чтения тела
+    res.on("close", () => {
+      clearInterval(heartbeat);
+      streams.delete(res);
+      if (streams.size === 0) eventStreams.delete(userId);
+    });
+  });
 
   // ---------- auth ----------
 
@@ -875,6 +964,7 @@ function createApi({ notify = {} } = {}) {
     const invite = await db.createInvite(startup.id, userId);
     if (!invite) throw new ApiError(409, "Этот кандидат уже приглашён");
 
+    publishEvent(userId);
     await safeNotify(notify.invite, startup, userId);
     res.status(201).json(invite);
   }));
@@ -906,6 +996,7 @@ function createApi({ notify = {} } = {}) {
       message
     );
 
+    publishEvent(startup.founder_id);
     await safeNotify(notify.newOffer, startup, offer);
     res.status(201).json(offer);
   }));
@@ -929,6 +1020,7 @@ function createApi({ notify = {} } = {}) {
 
     await db.updateOfferStatus(offerId, status);
     const updated = { ...offer, status };
+    publishEvent(offer.sender_id);
 
     await safeNotify(notifyFn, updated);
     res.json(updated);
@@ -944,6 +1036,10 @@ function createApi({ notify = {} } = {}) {
 
   // ---------- счётчики новых событий ----------
 
+  app.get("/api/events/ticket", wrap(async (req, res) => {
+    res.json({ ticket: createEventTicket(req.user.userId, botToken), expires_in: EVENT_TICKET_TTL_SECONDS });
+  }));
+
   app.get("/api/counters", wrap(async (req, res) => {
     res.json(await db.getCounters(req.user.userId));
   }));
@@ -951,6 +1047,7 @@ function createApi({ notify = {} } = {}) {
   app.post("/api/counters/seen", wrap(async (req, res) => {
     const section = requireOneOf(req.body?.section, ["responses", "contacts"], "section");
     await db.markSeen(req.user.userId, section);
+    publishEvent(req.user.userId); // другие устройства пользователя тоже погасят кружок
     res.status(204).end();
   }));
 

@@ -19,7 +19,14 @@ info:
       пользователей — основателя (id 910000000001) и кандидата (id 910000000002), см. DATA-API.yaml.
 
     ## Ошибки
-    Любая ошибка возвращается как `{"error": "текст на русском"}` с кодом 400, 401, 403, 404, 409 или 500.
+    Любая ошибка возвращается как `{"error": "текст на русском"}` с кодом 400, 401, 403, 404, 409, 429 или 500.
+
+    ## Безопасность
+    - Контакты (ФИО, телефон, e-mail, ссылка на MAX) отдаются только после MATCH и только при согласии.
+    - Телефон можно подтвердить через MAX (`WebApp.requestContact`), подпись проверяется на сервере.
+    - Жалобы: проект или человек, на которого пожаловались 3 разных пользователя, скрывается из поиска и подбора.
+    - Суточные лимиты (код 429): 10 проектов, 20 откликов, 30 приглашений, 50 решений по откликам, 20 жалоб.
+      На тестовые учётные записи лимиты не действуют.
 
     ## ИИ
     Idea Check, методика задач и подбор используют YandexGPT. Если ИИ недоступен, API не падает:
@@ -47,6 +54,8 @@ tags:
   - name: Подбор
     description: AI Match, поиск и приглашения (шаг 5)
   - name: Отклики и MATCH
+  - name: Безопасность
+    description: Подтверждение телефона через MAX и жалобы
 
 paths:
 
@@ -194,6 +203,81 @@ paths:
         "204": { description: Фото удалено }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /profile/phone:
+    post:
+      tags: [Безопасность]
+      summary: Подтвердить телефон через MAX
+      description: |
+        Передаётся ответ `WebApp.requestContact()` из MAX Bridge. Сервер проверяет подпись
+        HMAC-SHA256(authDate\nphone\nuserId) на ключе бота (номер без «+»), срок — 24 часа.
+        После проверки номер записывается в профиль с отметкой «подтверждён».
+        Если потом вписать другой номер вручную, отметка снимается.
+      operationId: verifyPhone
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, authDate, hash]
+              properties:
+                phone: { type: string, example: "+79001234567" }
+                authDate: { type: string, example: "1790445000" }
+                hash: { type: string, description: Подпись MAX }
+      responses:
+        "200":
+          description: Номер подтверждён
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [phone, phone_verified]
+                properties:
+                  phone: { type: string, example: "+79001234567" }
+                  phone_verified: { type: boolean, enum: [true] }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /reports:
+    post:
+      tags: [Безопасность]
+      summary: Пожаловаться на проект или пользователя
+      description: |
+        Одна жалоба от человека на одну цель. Проект или пользователь, на которого пожаловались
+        3 разных человека, скрывается из поиска, подбора и приглашений до проверки.
+      operationId: createReport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_type, target_id, reason]
+              properties:
+                target_type: { type: string, enum: [startup, user] }
+                target_id: { type: integer, format: int64, example: 12 }
+                reason:
+                  type: string
+                  enum: [money, fake, spam, rude, other]
+                  description: money — просит деньги, fake — фейк, spam — спам, rude — оскорбления, other — другое
+                comment: { type: string, maxLength: 500 }
+      responses:
+        "201":
+          description: Жалоба принята
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, hidden]
+                properties:
+                  id: { type: integer }
+                  hidden: { type: boolean, description: Цель скрыта из выдачи после этой жалобы }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
   /search/profile:
     get:
       tags: [Профиль]
@@ -231,6 +315,7 @@ paths:
               schema: { $ref: "#/components/schemas/StartupWithTasks" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /startups/my:
     get:
@@ -453,6 +538,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /invites:
     get:
@@ -548,6 +634,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /offers/received:
     get:
@@ -572,6 +659,7 @@ paths:
                           properties:
                             startup_name: { type: string }
                             sender_avatar_url: { type: string, nullable: true }
+                            sender_verified: { type: boolean, description: Телефон отправителя подтверждён через MAX }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /offers/{id}/accept:
@@ -590,6 +678,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /offers/{id}/reject:
     post:
@@ -606,6 +695,91 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /events/ticket:
+    get:
+      tags: [Отклики и MATCH]
+      summary: Пропуск для потока событий в реальном времени
+      description: EventSource в браузере не умеет передавать заголовок авторизации, поэтому поток открывается по короткоживущему пропуску (5 минут), подписанному ключом сервера.
+      operationId: getEventTicket
+      responses:
+        "200":
+          description: Пропуск
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ticket, expires_in]
+                properties:
+                  ticket: { type: string, example: "123456789.1790460277.9f26b87b…" }
+                  expires_in: { type: integer, example: 300 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /events:
+    get:
+      tags: [Отклики и MATCH]
+      summary: Поток событий в реальном времени (Server-Sent Events)
+      description: |
+        Долгое соединение `text/event-stream`. Сервер шлёт `event: counters`, когда пользователю пришёл
+        отклик, приглашение или MATCH, либо когда он отметил вкладку просмотренной на другом устройстве.
+        Раз в 20 секунд — комментарий `: ping`, чтобы соединение не закрыл прокси.
+        При обрыве клиент берёт новый пропуск и переподключается.
+      operationId: streamEvents
+      security: []
+      parameters:
+        - name: ticket
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Поток событий
+          content:
+            text/event-stream:
+              schema: { type: string, example: "event: counters\ndata: {}\n\n" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /counters:
+    get:
+      tags: [Отклики и MATCH]
+      summary: Счётчики новых событий для красных кружков на вкладках
+      description: |
+        responses — новые отклики на мои проекты (ещё без решения) и новые приглашения мне;
+        contacts — новые MATCH, где основатель принял мой отклик.
+        «Новое» — пришло после последнего открытия вкладки (POST /counters/seen).
+      operationId: getCounters
+      responses:
+        "200":
+          description: Счётчики
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [responses, contacts]
+                properties:
+                  responses: { type: integer, minimum: 0 }
+                  contacts: { type: integer, minimum: 0 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /counters/seen:
+    post:
+      tags: [Отклики и MATCH]
+      summary: Отметить вкладку просмотренной (обнулить счётчик)
+      operationId: markCountersSeen
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [section]
+              properties:
+                section: { type: string, enum: [responses, contacts] }
+      responses:
+        "204": { description: Отмечено }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   /contacts:
     get:
@@ -708,6 +882,12 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    TooManyRequests:
+      description: Превышен суточный лимит действий
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: "Сегодня отправлено уже 20 откликов — это максимум на сутки. Попробуйте завтра." }
     ServerError:
       description: Внутренняя ошибка
       content:
@@ -780,6 +960,7 @@ components:
         avatar_url: { type: string, nullable: true, example: /api/avatars/40325a61471224918d3c7bffa2508c3c }
         max_link: { type: string, description: Ссылка на профиль MAX, указанная вручную (пустая строка — не указана) }
         max_username: { type: string, nullable: true, description: Ник пользователя в MAX из подписанных данных }
+        phone_verified: { type: boolean, description: Телефон подтверждён через MAX }
 
     # ---------- проекты ----------
 
@@ -857,6 +1038,7 @@ components:
         economics: { type: string, nullable: true }
         partner_needed: { type: string, nullable: true }
         idea_map: { allOf: [{ $ref: "#/components/schemas/IdeaMap" }], nullable: true }
+        founder_verified: { type: boolean, description: Основатель подтвердил телефон через MAX (в поиске, приглашениях и публичной карточке) }
         readiness: { type: integer, minimum: 0, maximum: 100, nullable: true, description: Готовность проекта в процентах }
         created_at: { type: string, format: date-time }
 
@@ -936,6 +1118,7 @@ components:
         goal: { $ref: "#/components/schemas/Goal" }
         about: { type: string }
         avatar_url: { type: string, nullable: true }
+        phone_verified: { type: boolean, description: Телефон подтверждён через MAX }
         ai: { $ref: "#/components/schemas/AiEvaluation" }
         invited: { type: boolean }
 
@@ -981,6 +1164,7 @@ components:
         candidate_phone: { type: string, nullable: true }
         candidate_email: { type: string, nullable: true }
         candidate_avatar_url: { type: string, nullable: true }
+        candidate_phone_verified: { type: boolean }
         candidate_max_link: { type: string, nullable: true, description: Ссылка для кнопки «Написать в MAX» (только при согласии) }
         type: { type: string }
         message: { type: string }
@@ -1003,4 +1187,5 @@ components:
         founder_phone: { type: string, nullable: true }
         founder_email: { type: string, nullable: true }
         founder_avatar_url: { type: string, nullable: true }
+        founder_phone_verified: { type: boolean }
         founder_max_link: { type: string, nullable: true, description: Ссылка для кнопки «Написать в MAX» (только при согласии) }

@@ -283,16 +283,52 @@ function markSeen(section) {
   api("POST", "/api/counters/seen", { section }).catch(() => {});
 }
 
+// Когда пришло событие: обновляем кружки, а если нужная вкладка открыта — и сам список
+function onServerEvent() {
+  refreshCounters();
+  if (!$("view-responses").hidden) loadResponses();
+  if (!$("view-contacts").hidden) loadContacts();
+}
+
+// Соединение с сервером в реальном времени (Server-Sent Events).
+// Если оно недоступно, продолжает работать проверка раз в минуту.
+let eventSource = null;
+let eventRetryTimer = null;
+
+async function connectEvents() {
+  if (typeof EventSource !== "function" || !state.user) return;
+  clearTimeout(eventRetryTimer);
+  if (eventSource) eventSource.close();
+  try {
+    const { ticket } = await api("GET", "/api/events/ticket");
+    eventSource = new EventSource(`/api/events?ticket=${encodeURIComponent(ticket)}`);
+    eventSource.addEventListener("counters", onServerEvent);
+    eventSource.addEventListener("ready", refreshCounters);
+    eventSource.onerror = () => {
+      // Пропуск живёт 5 минут: при обрыве берём новый и переподключаемся
+      eventSource.close();
+      eventSource = null;
+      eventRetryTimer = setTimeout(connectEvents, 5000);
+    };
+  } catch {
+    eventRetryTimer = setTimeout(connectEvents, 30000);
+  }
+}
+
 function startCounters() {
   clearInterval(counterTimer);
   refreshCounters();
+  connectEvents();
   counterTimer = setInterval(() => {
     if (document.visibilityState === "visible") refreshCounters();
   }, 60 * 1000);
 }
 
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") refreshCounters();
+  if (document.visibilityState !== "visible") return;
+  refreshCounters();
+  // Телефон мог усыпить соединение, пока приложение было свёрнуто
+  if (state.user && !state.onboarding && (!eventSource || eventSource.readyState === 2)) connectEvents();
 });
 
 function show(view) {
