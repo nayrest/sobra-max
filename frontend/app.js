@@ -134,6 +134,12 @@ function initialsOf(name) {
 // Отметка «телефон подтверждён через MAX»
 const verifiedBadge = (flag, text = "✓ Телефон подтверждён") => (flag ? badge(text, "green") : "");
 
+// Демо-данные (demo-data.sql): вымышленные основатели и кандидаты. Сервер отвечает за них сам.
+const isDemoId = (id) => Number(id) >= 900000000000 && Number(id) <= 900000000999;
+const demoBadge = (id) => (isDemoId(id) ? badge("Демо", "gray") : "");
+const demoContactsNote = (who) =>
+  `<p class="muted demo-note">Это ${who} из демо-данных — настоящих контактов у него нет. У реального человека здесь будут «Написать в MAX», телефон и e-mail.</p>`;
+
 // Кнопка жалобы. type: startup | user
 const reportButton = (type, id, label) =>
   `<button class="text-btn report-btn" type="button" data-report="${type}" data-target="${id}" data-label="${esc(label)}">⚑ Пожаловаться</button>`;
@@ -960,14 +966,15 @@ async function loadCandidates(id) {
         <div class="person">
           ${avatarHtml(c.avatar_url, c.name)}
           <div class="grow"><h3>${esc(c.name)}</h3><p class="muted">${esc(GOALS[c.goal] || "")}</p>
-            <div class="chips">${verifiedBadge(c.phone_verified)}</div></div>
+            <div class="chips">${demoBadge(c.user_id)} ${verifiedBadge(c.phone_verified)}</div></div>
         </div>
         <p class="answer">${esc(c.about)}</p>
         ${renderAi(c.ai)}
+        ${isDemoId(c.user_id) && !c.invited ? `<p class="muted demo-note">Демо-кандидат: на приглашение он откликнется автоматически через несколько секунд.</p>` : ""}
         <div class="actions">
           ${c.invited
             ? `<button class="btn secondary" type="button" disabled>Приглашение отправлено ✓</button>`
-            : `<button class="btn primary" type="button" data-invite="${c.user_id}">Пригласить в проект</button>`}
+            : `<button class="btn primary" type="button" data-invite="${c.user_id}" ${isDemoId(c.user_id) ? "data-demo" : ""}>Пригласить в проект</button>`}
         </div>
         <div class="card-foot">${reportButton("user", c.user_id, c.name)}</div>
       </article>`).join("");
@@ -984,7 +991,9 @@ async function handleInvite(event) {
       api("POST", `/api/startups/${state.currentProjectId}/invite`, { user_id: Number(button.dataset.invite) })
     );
     button.outerHTML = `<button class="btn secondary" type="button" disabled>Приглашение отправлено ✓</button>`;
-    toast("Приглашение отправлено. Кандидат получит сообщение в MAX.");
+    toast("demo" in button.dataset
+      ? "Приглашение отправлено. Демо-кандидат откликнется через несколько секунд — смотрите «Отклики»."
+      : "Приглашение отправлено. Кандидат получит сообщение в MAX.");
   } catch (error) {
     toast(error.message, "error");
   }
@@ -1535,7 +1544,7 @@ function projectForCandidate(s, ai) {
       <span class="project-icon">${CATEGORY_ICON[s.category] || "💡"}</span>
       <div class="grow">
         <h3>${esc(s.name)}</h3>
-        <div class="chips">${badge(s.stage)} ${badge(s.category, "violet")} ${badge(s.market_type, "gray")}</div>
+        <div class="chips">${demoBadge(s.founder_id)} ${badge(s.stage)} ${badge(s.category, "violet")} ${badge(s.market_type, "gray")}</div>
       </div>
     </div>
     <p class="muted">Ищет: ${esc(seekingText(s))}</p>
@@ -1544,7 +1553,8 @@ function projectForCandidate(s, ai) {
     ${renderAi(ai, "Почему вы подходите")}
     ${isOwn
       ? `<p class="muted">Это ваш проект</p>`
-      : `<button class="btn primary block" type="button" data-respond="${s.id}" data-name="${esc(s.name)}">Откликнуться</button>
+      : `${isDemoId(s.founder_id) ? `<p class="muted demo-note">Демо-проект: основатель вымышленный и примет отклик автоматически — так можно пройти путь до MATCH.</p>` : ""}
+         <button class="btn primary block" type="button" data-respond="${s.id}" data-name="${esc(s.name)}" ${isDemoId(s.founder_id) ? "data-demo" : ""}>Откликнуться</button>
          <div class="card-foot">${reportButton("startup", s.id, s.name)}</div>`}
   </article>`;
 }
@@ -1555,14 +1565,15 @@ function projectForCandidate(s, ai) {
 
 function respondClick(event) {
   const button = event.target.closest("[data-respond]");
-  if (button) openOfferSheet(button.dataset.respond, button.dataset.name);
+  if (button) openOfferSheet(button.dataset.respond, button.dataset.name, "demo" in button.dataset);
 }
 
-function openOfferSheet(startupId, name) {
+function openOfferSheet(startupId, name, isDemo = false) {
   const form = $("offer-form");
   form.reset();
   formError("offer-error", null);
   state.offerStartupId = Number(startupId);
+  state.offerToDemo = isDemo;
   $("offer-project").textContent = name;
   const goal = state.lastSearchGoal || state.profile?.goal;
   if (goal) form.elements.type.value = goal;
@@ -1600,7 +1611,9 @@ function setupOfferForm() {
         })
       );
       closeOfferSheet();
-      toast("Отклик отправлен. Основатель получит уведомление в MAX.");
+      toast(state.offerToDemo
+        ? "Отклик отправлен. Это демо-проект — основатель примет его через несколько секунд."
+        : "Отклик отправлен. Основатель получит уведомление в MAX.");
     } catch (error) {
       formError("offer-error", error);
     }
@@ -1626,7 +1639,7 @@ async function loadResponses() {
       offersEl.innerHTML = offers.map((o) => {
         const st = OFFER_STATUS[o.status] || { text: o.status, tone: "gray" };
         return `<article class="card">
-          <div class="chips">${badge(st.text, st.tone)} ${badge(o.type, "gray")}</div>
+          <div class="chips">${badge(st.text, st.tone)} ${badge(o.type, "gray")} ${demoBadge(o.sender_id)}</div>
           <h3>${esc(o.startup_name)}</h3>
           <div class="person small">${avatarHtml(o.sender_avatar_url, o.sender_name)}
             <p class="muted">От: ${esc(o.sender_name || "пользователь MAX")} · ${dateText(o.created_at)}</p></div>
@@ -1733,24 +1746,24 @@ async function loadContacts() {
 
     if (contacts.length === 0) empty(contactsEl, "Здесь появятся кандидаты, чьи отклики вы примете.");
     else contactsEl.innerHTML = contacts.map((c) => `<article class="card">
-        <div class="chips">${badge("MATCH", "green")} ${badge(c.type, "gray")}</div>
+        <div class="chips">${badge("MATCH", "green")} ${badge(c.type, "gray")} ${demoBadge(c.candidate_id)}</div>
         <div class="person">${avatarHtml(c.candidate_avatar_url, c.candidate_name)}
           <div class="grow"><h3>${esc(c.candidate_name || "Пользователь MAX")}</h3>
           <p class="muted">Проект: ${esc(c.startup_name)} · ${dateText(c.created_at)}</p>
           <div class="chips">${verifiedBadge(c.candidate_phone_verified)}</div></div></div>
-        ${contactLinks(c.candidate_phone, c.candidate_email, c.candidate_max_link, c.offer_id)}
+        ${isDemoId(c.candidate_id) ? demoContactsNote("кандидат") : contactLinks(c.candidate_phone, c.candidate_email, c.candidate_max_link, c.offer_id)}
         <p class="answer">${esc(c.message)}</p>
         <div class="card-foot">${reportButton("user", c.candidate_id, c.candidate_name || "пользователь MAX")}</div>
       </article>`).join("");
 
     if (matches.length === 0) empty(matchesEl, "Здесь появятся проекты, основатели которых приняли ваш отклик.");
     else matchesEl.innerHTML = matches.map((m) => `<article class="card">
-        <div class="chips">${badge("MATCH", "green")} ${badge(m.type, "gray")}</div>
+        <div class="chips">${badge("MATCH", "green")} ${badge(m.type, "gray")} ${demoBadge(m.founder_id)}</div>
         <h3>${esc(m.startup_name)}</h3>
         <div class="person small">${avatarHtml(m.founder_avatar_url, m.founder_name)}
-          <p class="muted">Основатель: ${esc(m.founder_name || "пользователь MAX")} · ${dateText(m.created_at)}</p></div>
+          <p class="muted">Основатель: ${esc(m.founder_name || (isDemoId(m.founder_id) ? "демо-основатель" : "пользователь MAX"))} · ${dateText(m.created_at)}</p></div>
         ${m.founder_phone_verified ? `<div class="chips">${verifiedBadge(true)}</div>` : ""}
-        ${contactLinks(m.founder_phone, m.founder_email, m.founder_max_link, m.offer_id)}
+        ${isDemoId(m.founder_id) ? demoContactsNote("основатель") : contactLinks(m.founder_phone, m.founder_email, m.founder_max_link, m.offer_id)}
         <p class="answer"><b>Ваш отклик.</b> ${esc(m.message)}</p>
         <div class="card-foot">${reportButton("user", m.founder_id, `${m.founder_name || "основатель"} (проект «${m.startup_name}»)`)}</div>
       </article>`).join("");

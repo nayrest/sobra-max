@@ -22,6 +22,14 @@ const TEST_ID_MIN = 910000000000;
 const TEST_ID_MAX = 910000000999;
 const isTestUser = (id) => Number(id) >= TEST_ID_MIN && Number(id) <= TEST_ID_MAX;
 
+// Демо-данные из demo-data.sql: вымышленные основатели (900000000001–099)
+// и кандидаты (900000000101–199). За них отвечает сервер — см. «ДЕМО-АВТООТВЕТЫ».
+const DEMO_ID_MIN = 900000000000;
+const DEMO_ID_MAX = 900000000999;
+const isDemoUser = (id) => Number(id) >= DEMO_ID_MIN && Number(id) <= DEMO_ID_MAX;
+// Пауза перед автоответом, чтобы он выглядел как ответ человека, а не мгновенная заглушка
+const DEMO_REPLY_DELAY = "3 seconds";
+
 // Сколько разных людей должны пожаловаться, чтобы проект или человек скрылся из выдачи
 const REPORT_HIDE_THRESHOLD = 3;
 const NOT_HIDDEN_STARTUP = (alias) => `
@@ -766,8 +774,55 @@ async function logContactClick(userId, offerId, channel) {
   return rows.length > 0;
 }
 
+// ======================================================
+// ДЕМО-АВТООТВЕТЫ
+// ======================================================
+// Демо-основатель сам принимает отклики на свой проект, а демо-кандидат сам
+// откликается на приглашение. Так путь до MATCH можно пройти с одного аккаунта.
+// В статистику (scripts/stats.sql) демо-пары не попадают.
+
+async function demoAcceptOffers() {
+  const { rows } = await pool.query(
+    `UPDATE offers o SET status = 'accepted', decided_at = NOW()
+     FROM startups s
+     WHERE s.id = o.startup_id
+       AND o.status = 'new'
+       AND s.founder_id BETWEEN $1 AND $2
+       AND o.created_at < NOW() - INTERVAL '${DEMO_REPLY_DELAY}'
+     RETURNING o.*, s.name AS startup_name, s.founder_id`,
+    [DEMO_ID_MIN, DEMO_ID_MAX]
+  );
+  return rows;
+}
+
+async function demoRespondToInvites(typeByGoal) {
+  const { rows } = await pool.query(
+    `INSERT INTO offers (startup_id, sender_id, sender_name, type, message, status)
+     SELECT i.startup_id, i.user_id, u.name,
+       CASE WHEN sp.goal = 'partner' THEN $3 ELSE $4 END,
+       'Здравствуйте! Спасибо за приглашение — проект мне интересен, готов обсудить участие. '
+         || '(Это демо-кандидат: ответ создан автоматически.)',
+       'new'
+     FROM invites i
+     JOIN startups s ON s.id = i.startup_id AND s.status = 'published'
+     LEFT JOIN users u ON u.user_id = i.user_id
+     LEFT JOIN search_profiles sp ON sp.user_id = i.user_id
+     WHERE i.user_id BETWEEN $1 AND $2
+       AND i.created_at < NOW() - INTERVAL '${DEMO_REPLY_DELAY}'
+       AND NOT EXISTS (
+         SELECT 1 FROM offers o WHERE o.startup_id = i.startup_id AND o.sender_id = i.user_id
+       )
+     RETURNING *`,
+    [DEMO_ID_MIN, DEMO_ID_MAX, typeByGoal.partner, typeByGoal.team]
+  );
+  return rows;
+}
+
 module.exports = {
   pool,
+  isDemoUser,
+  demoAcceptOffers,
+  demoRespondToInvites,
   logContactClick,
   getCounters,
   markSeen,

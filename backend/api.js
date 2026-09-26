@@ -359,6 +359,33 @@ function createApi({ notify = {} } = {}) {
     }
   };
 
+  // ---------- демо-автоответы ----------
+  // Через несколько секунд после отклика на демо-проект или приглашения демо-кандидата
+  // сервер отвечает за вымышленного человека. Раз в минуту — проверка на случай перезапуска.
+  let demoRunning = false;
+  async function runDemoReplies() {
+    if (demoRunning) return;
+    demoRunning = true;
+    try {
+      for (const offer of await db.demoAcceptOffers()) {
+        publishEvent(offer.sender_id);
+        await safeNotify(notify.offerAccepted, offer);
+      }
+      for (const offer of await db.demoRespondToInvites(OFFER_TYPES)) {
+        const startup = await db.getStartupById(offer.startup_id);
+        if (!startup) continue;
+        publishEvent(startup.founder_id);
+        await safeNotify(notify.newOffer, startup, offer);
+      }
+    } catch (error) {
+      console.error("❌ Ошибка демо-автоответа:", error.message);
+    } finally {
+      demoRunning = false;
+    }
+  }
+  const scheduleDemoReply = () => setTimeout(runDemoReplies, 4000).unref();
+  setInterval(runDemoReplies, 60 * 1000).unref();
+
   // ---------- суточные лимиты против массового сбора контактов и спама ----------
   // Тестовые учётные записи жюри лимитами не ограничены: автопроверки гоняются много раз.
   const DAILY_LIMITS = {
@@ -965,7 +992,8 @@ function createApi({ notify = {} } = {}) {
     if (!invite) throw new ApiError(409, "Этот кандидат уже приглашён");
 
     publishEvent(userId);
-    await safeNotify(notify.invite, startup, userId);
+    if (db.isDemoUser(userId)) scheduleDemoReply();
+    else await safeNotify(notify.invite, startup, userId);
     res.status(201).json(invite);
   }));
 
@@ -997,7 +1025,8 @@ function createApi({ notify = {} } = {}) {
     );
 
     publishEvent(startup.founder_id);
-    await safeNotify(notify.newOffer, startup, offer);
+    if (db.isDemoUser(startup.founder_id)) scheduleDemoReply();
+    else await safeNotify(notify.newOffer, startup, offer);
     res.status(201).json(offer);
   }));
 
