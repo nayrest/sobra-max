@@ -749,8 +749,26 @@ async function markSeen(userId, section) {
   await pool.query(`UPDATE users SET ${column} = NOW() WHERE user_id = $1`, [userId]);
 }
 
+// ======================================================
+// НАЖАТИЯ НА КОНТАКТЫ ПОСЛЕ MATCH (статистика)
+// ======================================================
+
+// Записывает нажатие, только если пользователь — участник принятого отклика
+async function logContactClick(userId, offerId, channel) {
+  const { rows } = await pool.query(
+    `INSERT INTO contact_clicks (user_id, offer_id, channel)
+     SELECT $1, o.id, $3
+     FROM offers o JOIN startups s ON s.id = o.startup_id
+     WHERE o.id = $2 AND o.status = 'accepted' AND (o.sender_id = $1 OR s.founder_id = $1)
+     RETURNING id`,
+    [userId, offerId, channel]
+  );
+  return rows.length > 0;
+}
+
 module.exports = {
   pool,
+  logContactClick,
   getCounters,
   markSeen,
   saveVerifiedPhone,

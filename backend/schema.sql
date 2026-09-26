@@ -206,3 +206,17 @@ CREATE INDEX IF NOT EXISTS idx_reports_target ON reports (target_type, target_id
 -- Когда пользователь последний раз открывал вкладку. Всё, что пришло позже, — «новое».
 ALTER TABLE users ADD COLUMN IF NOT EXISTS seen_responses_at TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS seen_contacts_at TIMESTAMPTZ;
+
+-- ======================================================
+-- Нажатия на контакты после MATCH (для статистики)
+-- ======================================================
+-- channel: max — «Написать в MAX», phone — звонок, email — письмо
+CREATE TABLE IF NOT EXISTS contact_clicks (
+  id          SERIAL PRIMARY KEY,
+  user_id     BIGINT NOT NULL,
+  offer_id    INTEGER NOT NULL,
+  channel     TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_contact_clicks_offer ON contact_clicks (offer_id);

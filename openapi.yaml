@@ -781,6 +781,28 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /contacts/click:
+    post:
+      tags: [Отклики и MATCH]
+      summary: Отметить нажатие на контакт после MATCH (статистика)
+      description: Мини-приложение вызывает метод, когда человек нажимает «Написать в MAX», телефон или e-mail в карточке MATCH. Записывается, только если пользователь — участник принятого отклика.
+      operationId: trackContactClick
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [offer_id, channel]
+              properties:
+                offer_id: { type: integer }
+                channel: { type: string, enum: [max, phone, email] }
+      responses:
+        "204": { description: Записано }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /contacts:
     get:
       tags: [Отклики и MATCH]

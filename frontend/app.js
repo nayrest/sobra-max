@@ -1633,13 +1633,34 @@ async function handleDecision(event) {
 // ======================================================
 
 // Телефон и e-mail приходят с сервера только после MATCH и только при согласии человека
-function contactLinks(phone, email, maxLink) {
+function contactLinks(phone, email, maxLink, offerId) {
   const links = [];
-  if (maxLink) links.push(`<button class="contact-link max" type="button" data-max-link="${esc(maxLink)}">💬 Написать в MAX</button>`);
-  if (phone) links.push(`<a class="contact-link" href="tel:${esc(phone)}">📞 ${esc(formatRuPhone(phone))}</a>`);
-  if (email) links.push(`<a class="contact-link" href="mailto:${esc(email)}">✉️ ${esc(email)}</a>`);
+  const track = (channel) => `data-track="${channel}" data-offer="${Number(offerId) || ""}"`;
+  if (maxLink) links.push(`<button class="contact-link max" type="button" data-max-link="${esc(maxLink)}" ${track("max")}>💬 Написать в MAX</button>`);
+  if (phone) links.push(`<a class="contact-link" href="tel:${esc(phone)}" ${track("phone")}>📞 ${esc(formatRuPhone(phone))}</a>`);
+  if (email) links.push(`<a class="contact-link" href="mailto:${esc(email)}" ${track("email")}>✉️ ${esc(email)}</a>`);
   if (links.length === 0) return `<p class="muted">Контакты пока не указаны в профиле.</p>`;
   return `<div class="contact-links">${links.join("")}</div>`;
+}
+
+// Статистика нажатий на контакты. keepalive — чтобы запрос ушёл, даже если MAX
+// сразу откроет чат и свернёт мини-приложение. Ошибки не мешают пользователю.
+function trackContactClick(event) {
+  const el = event.target.closest("[data-track]");
+  if (!el || !el.dataset.offer) return;
+  const headers = { "Content-Type": "application/json" };
+  if (initData) headers.Authorization = `Bearer ${initData}`;
+  else if (debugUserId) headers["X-Debug-User-Id"] = debugUserId;
+  try {
+    fetch("/api/contacts/click", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ offer_id: Number(el.dataset.offer), channel: el.dataset.track }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    /* статистика не критична */
+  }
 }
 
 // Открывает профиль собеседника в MAX. Внутри MAX — через MAX Bridge (без выхода из приложения),
@@ -1678,7 +1699,7 @@ async function loadContacts() {
           <div class="grow"><h3>${esc(c.candidate_name || "Пользователь MAX")}</h3>
           <p class="muted">Проект: ${esc(c.startup_name)} · ${dateText(c.created_at)}</p>
           <div class="chips">${verifiedBadge(c.candidate_phone_verified)}</div></div></div>
-        ${contactLinks(c.candidate_phone, c.candidate_email, c.candidate_max_link)}
+        ${contactLinks(c.candidate_phone, c.candidate_email, c.candidate_max_link, c.offer_id)}
         <p class="answer">${esc(c.message)}</p>
         <div class="card-foot">${reportButton("user", c.candidate_id, c.candidate_name || "пользователь MAX")}</div>
       </article>`).join("");
@@ -1690,7 +1711,7 @@ async function loadContacts() {
         <div class="person small">${avatarHtml(m.founder_avatar_url, m.founder_name)}
           <p class="muted">Основатель: ${esc(m.founder_name || "пользователь MAX")} · ${dateText(m.created_at)}</p></div>
         ${m.founder_phone_verified ? `<div class="chips">${verifiedBadge(true)}</div>` : ""}
-        ${contactLinks(m.founder_phone, m.founder_email, m.founder_max_link)}
+        ${contactLinks(m.founder_phone, m.founder_email, m.founder_max_link, m.offer_id)}
         <p class="answer"><b>Ваш отклик.</b> ${esc(m.message)}</p>
         <div class="card-foot">${reportButton("user", m.founder_id, `${m.founder_name || "основатель"} (проект «${m.startup_name}»)`)}</div>
       </article>`).join("");
@@ -1797,8 +1818,10 @@ document.addEventListener("DOMContentLoaded", () => {
   $("offers-list").addEventListener("click", handleDecision);
   $("invites-list").addEventListener("click", respondClick);
   $("auth-retry").addEventListener("click", authorize);
-  $("contacts-list").addEventListener("click", openInMax);
-  $("matches-list").addEventListener("click", openInMax);
+  for (const list of ["contacts-list", "matches-list"]) {
+    $(list).addEventListener("click", trackContactClick);
+    $(list).addEventListener("click", openInMax);
+  }
 
   authorize();
 });

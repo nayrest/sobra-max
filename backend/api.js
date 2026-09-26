@@ -1053,6 +1053,16 @@ function createApi({ notify = {} } = {}) {
 
   // ---------- contacts (после MATCH) ----------
 
+  // Статистика: человек нажал «Написать в MAX», телефон или e-mail в карточке MATCH
+  app.post("/api/contacts/click", wrap(async (req, res) => {
+    const offerId = parseId(req.body?.offer_id);
+    const channel = requireOneOf(req.body?.channel, ["max", "phone", "email"], "channel");
+    if (!(await db.logContactClick(req.user.userId, offerId, channel))) {
+      throw new ApiError(404, "MATCH не найден");
+    }
+    res.status(204).end();
+  }));
+
   app.get("/api/contacts", wrap(async (req, res) => {
     const contacts = await db.getContactsForFounder(req.user.userId);
     res.json({ contacts: contacts.map(({ candidate_avatar, ...c }) => ({ ...c, candidate_avatar_url: avatarUrl(candidate_avatar) })) });
