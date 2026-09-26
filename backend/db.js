@@ -15,6 +15,13 @@ const fs = require("fs");
 const path = require("path");
 const { Pool } = require("pg");
 
+// Тестовые пользователи для автоматической проверки (вход по X-Test-Token).
+// Их проекты и профили не видны реальным пользователям, и наоборот.
+const TEST_USERS = { founder: 910000000001, candidate: 910000000002 };
+const TEST_ID_MIN = 910000000000;
+const TEST_ID_MAX = 910000000999;
+const isTestUser = (id) => Number(id) >= TEST_ID_MIN && Number(id) <= TEST_ID_MAX;
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   // Пример DATABASE_URL:
@@ -165,7 +172,7 @@ const wantedSeeking = {
 };
 
 // Логика: в выдачу попадают только стартапы, совпавшие по всем критериям.
-async function findMatches(criteria) {
+async function findMatches(criteria, viewerId = null) {
   const { rows: startups } = await pool.query(
     `SELECT * FROM startups WHERE status = 'published' ORDER BY id DESC`
   );
@@ -174,6 +181,9 @@ async function findMatches(criteria) {
   const results = [];
 
   for (const startup of startups) {
+    // Тестовые проекты видит только тестовый кандидат
+    if (isTestUser(startup.founder_id) !== isTestUser(viewerId)) continue;
+
     let matched = 0;
     let total = 3;
 
@@ -403,9 +413,10 @@ async function getCandidatesForStartup(startup, limit = 20) {
        AND sp.user_id <> $1
        AND ($2::text IS NULL OR sp.goal = $2)
        AND (sp.category IS NULL OR sp.category = 'Любая' OR sp.category = $3)
+       AND ((sp.user_id BETWEEN $5 AND $6) = $7)
      ORDER BY sp.created_at DESC
      LIMIT $4`,
-    [startup.founder_id, goal || null, startup.category, limit]
+    [startup.founder_id, goal || null, startup.category, limit, TEST_ID_MIN, TEST_ID_MAX, isTestUser(startup.founder_id)]
   );
 
   return rows;
@@ -579,6 +590,8 @@ async function getAvatarByToken(token) {
 
 module.exports = {
   pool,
+  TEST_USERS,
+  isTestUser,
   syncTasks,
   getTasks,
   getTask,

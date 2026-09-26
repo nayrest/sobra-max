@@ -160,6 +160,37 @@ function extractInitData(req) {
   return req.get("x-max-init-data") || null;
 }
 
+// ======================================================
+// ТЕСТОВЫЕ УЧЁТНЫЕ ЗАПИСИ для автоматической проверки (DATA-API.yaml)
+// ======================================================
+// Робот платформы проверки не может подписать initData, поэтому ему выдаются
+// два токена: X-Test-Token открывает ТОЛЬКО тестовых пользователей с фиксированными id.
+// Зайти под реальным пользователем по токену нельзя. Если переменные не заданы — вход выключен.
+
+const TEST_ACCOUNTS = [
+  { env: "API_TEST_TOKEN_FOUNDER", userId: db.TEST_USERS.founder, name: "Тестовый основатель" },
+  { env: "API_TEST_TOKEN_CANDIDATE", userId: db.TEST_USERS.candidate, name: "Тестовый кандидат" },
+];
+
+function safeEqual(a, b) {
+  const x = Buffer.from(String(a));
+  const y = Buffer.from(String(b));
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+}
+
+function testAccountFromToken(req) {
+  const token = req.get("x-test-token");
+  if (!token) return null;
+  for (const account of TEST_ACCOUNTS) {
+    const expected = process.env[account.env];
+    // Короткие токены не принимаем: их легко подобрать
+    if (expected && expected.length >= 24 && safeEqual(token, expected)) {
+      return { userId: account.userId, name: account.name };
+    }
+  }
+  return null;
+}
+
 function authMiddleware(botToken) {
   const debugAuth = process.env.API_DEBUG_AUTH === "true";
 
@@ -171,7 +202,7 @@ function authMiddleware(botToken) {
   }
 
   return wrap(async (req, res, next) => {
-    let user = validateInitData(extractInitData(req), botToken);
+    let user = validateInitData(extractInitData(req), botToken) || testAccountFromToken(req);
 
     if (!user && debugAuth && req.get("x-debug-user-id")) {
       user = { userId: parseId(req.get("x-debug-user-id")), name: "Debug User" };
@@ -475,7 +506,7 @@ function createApi({ notify = {} } = {}) {
     }
 
     await db.saveSearchProfile(req.user.userId, { ...criteria, about });
-    const found = await db.findMatches(criteria);
+    const found = await db.findMatches(criteria, req.user.userId);
 
     // ИИ оценивает только то, что прошло фильтры. При сбое ИИ поиск всё равно отвечает.
     const { matches, ai } = await aiMatching.enrichMatches(about, criteria, found);

@@ -1,0 +1,996 @@
+openapi: 3.0.3
+
+info:
+  title: SOBRA API
+  version: 1.0.0
+  description: |
+    REST API мини-приложения SOBRA в MAX.
+
+    SOBRA помогает основателю проверить бизнес-идею и найти партнёра или co-founder'а:
+    **Idea Check → Project Map → Action Plan → Update → AI Match**.
+    Кандидат заполняет профиль, ищет проекты и откликается. Принятый отклик — MATCH:
+    стороны видят телефон и e-mail друг друга (только при согласии на показ контактов).
+
+    ## Авторизация
+    - **Мини-приложение в MAX**: `Authorization: Bearer <initData>`. Подпись initData проверяется
+      по алгоритму MAX (HMAC-SHA256 с ключом от токена бота), срок жизни — 24 часа.
+    - **Автоматическая проверка**: `X-Test-Token: <токен>`. Токен открывает только тестовых
+      пользователей — основателя (id 910000000001) и кандидата (id 910000000002), см. DATA-API.yaml.
+
+    ## Ошибки
+    Любая ошибка возвращается как `{"error": "текст на русском"}` с кодом 400, 401, 403, 404, 409 или 500.
+
+    ## ИИ
+    Idea Check, методика задач и подбор используют YandexGPT. Если ИИ недоступен, API не падает:
+    карта строится по правилам, методика берётся из шаблона, подбор возвращает результаты без оценки
+    (поле `ai.status`).
+
+servers:
+  - url: https://158-160-202-57.nip.io/api
+    description: Рабочий сервер (Yandex Cloud)
+  - url: http://localhost:3000/api
+    description: Локальный запуск через docker compose
+
+security:
+  - MaxInitData: []
+  - TestToken: []
+
+tags:
+  - name: Сервис
+  - name: Профиль
+    description: Профиль пользователя, согласие на показ контактов, фото
+  - name: Проекты
+    description: Idea Check и карта проекта (шаги 1–2)
+  - name: План действий
+    description: Action Plan и Update (шаги 3–4)
+  - name: Подбор
+    description: AI Match, поиск и приглашения (шаг 5)
+  - name: Отклики и MATCH
+
+paths:
+
+  # ================= Сервис =================
+
+  /health:
+    get:
+      tags: [Сервис]
+      summary: Проверка работы API и базы данных
+      operationId: health
+      security: []
+      responses:
+        "200":
+          description: API и база работают
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, example: ok }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /auth:
+    post:
+      tags: [Сервис]
+      summary: Проверка подписи initData из MAX
+      description: Мини-приложение вызывает метод при запуске. Пользователь заносится в базу.
+      operationId: auth
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [init_data]
+              properties:
+                init_data: { type: string, description: Строка window.WebApp.initData из MAX Bridge }
+      responses:
+        "200":
+          description: Подпись верна
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user_id]
+                properties:
+                  user_id: { type: integer, format: int64, example: 123456789 }
+                  name: { type: string, nullable: true, example: Иван Петров }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /avatars/{token}:
+    get:
+      tags: [Профиль]
+      summary: Фото профиля по ссылке
+      description: |
+        Без авторизации: тег `<img>` не умеет передавать заголовки. Ссылка содержит случайный
+        128-битный токен, меняется при каждой загрузке фото и выдаётся только в авторизованных ответах.
+      operationId: getAvatar
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string, pattern: "^[a-f0-9]{32}$" }
+      responses:
+        "200":
+          description: Изображение
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ================= Профиль =================
+
+  /profile:
+    get:
+      tags: [Профиль]
+      summary: Мой профиль
+      operationId: getProfile
+      responses:
+        "200":
+          description: Профиль (пустые поля, если ещё не заполнен)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Profile" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      tags: [Профиль]
+      summary: Сохранить профиль
+      description: |
+        Без согласия (`consent: true`) профиль не сохраняется: ФИО, телефон и e-mail
+        увидит только тот, с кем случится MATCH. Телефон приводится к виду +7XXXXXXXXXX.
+      operationId: saveProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProfileInput" }
+      responses:
+        "200":
+          description: Профиль сохранён
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Profile" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /profile/avatar:
+    put:
+      tags: [Профиль]
+      summary: Загрузить фото профиля
+      description: |
+        Картинка передаётся как data URL. Мини-приложение заранее обрезает её до 256×256 и сжимает в JPEG.
+        Сервер проверяет сигнатуру файла (JPEG, PNG, WebP) и размер — не больше 200 КБ.
+      operationId: uploadAvatar
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [image]
+              properties:
+                image: { type: string, example: "data:image/jpeg;base64,/9j/4AAQSkZJRg..." }
+      responses:
+        "200":
+          description: Фото сохранено
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [avatar_url]
+                properties:
+                  avatar_url: { type: string, example: /api/avatars/40325a61471224918d3c7bffa2508c3c }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    delete:
+      tags: [Профиль]
+      summary: Удалить фото профиля
+      operationId: deleteAvatar
+      responses:
+        "204": { description: Фото удалено }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /search/profile:
+    get:
+      tags: [Профиль]
+      summary: Сырые данные профиля поиска (служебный метод)
+      operationId: getSearchProfile
+      responses:
+        "200":
+          description: Строка профиля из базы или null
+          content:
+            application/json:
+              schema: { type: object, nullable: true, additionalProperties: true }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ================= Проекты =================
+
+  /startups:
+    post:
+      tags: [Проекты]
+      summary: Idea Check — создать проект и получить карту
+      description: |
+        Ответы раскладываются по 7 блокам карты: статус каждого — `confirmed` (есть факты),
+        `hypothesis` (предположение) или `missing` (не проработано). Готовность = (подтверждено + 0,5 × гипотезы) / 7.
+        По каждому неподтверждённому блоку создаётся задача плана действий. Проект создаётся черновиком.
+      operationId: createStartup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StartupInput" }
+      responses:
+        "201":
+          description: Проект создан, карта построена
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StartupWithTasks" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /startups/my:
+    get:
+      tags: [Проекты]
+      summary: Мои проекты
+      operationId: listMyStartups
+      responses:
+        "200":
+          description: Проекты основателя, новые первыми
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [startups]
+                properties:
+                  startups:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/Startup"
+                        - type: object
+                          properties:
+                            tasks_open: { type: integer, description: Задач плана в работе }
+                            tasks_done: { type: integer, description: Выполненных задач плана }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /startups/public/{id}:
+    get:
+      tags: [Проекты]
+      summary: Опубликованный проект (для кандидатов)
+      operationId: getPublicStartup
+      parameters: [{ $ref: "#/components/parameters/StartupId" }]
+      responses:
+        "200":
+          description: Проект
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Startup" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /startups/{id}:
+    parameters: [{ $ref: "#/components/parameters/StartupId" }]
+    get:
+      tags: [Проекты]
+      summary: Карта проекта с планом действий
+      description: Только свой проект. Для проектов без карты она строится при первом открытии.
+      operationId: getStartup
+      responses:
+        "200":
+          description: Проект, карта и задачи
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StartupWithTasks" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Проекты]
+      summary: Обновить блоки карты вручную
+      description: Передаются только изменённые поля Idea Check. Карта и план пересчитываются.
+      operationId: updateStartup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IdeaFieldsPatch" }
+      responses:
+        "200":
+          description: Карта пересчитана
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StartupWithTasks" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Проекты]
+      summary: Удалить черновик
+      operationId: deleteStartup
+      responses:
+        "204": { description: Черновик удалён }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /startups/{id}/publish:
+    post:
+      tags: [Проекты]
+      summary: Опубликовать проект
+      description: После публикации проект виден кандидатам в поиске и доступен ИИ-подбор.
+      operationId: publishStartup
+      parameters: [{ $ref: "#/components/parameters/StartupId" }]
+      responses:
+        "200":
+          description: Проект опубликован (повторный вызов безопасен)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Startup" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ================= План действий =================
+
+  /startups/{id}/tasks/{taskId}/method:
+    post:
+      tags: [План действий]
+      summary: Методика задачи от ИИ под конкретный проект
+      description: YandexGPT расписывает 3–5 шагов выполнения задачи. Если ИИ недоступен, остаётся шаблон (`ai=false`).
+      operationId: buildTaskMethod
+      parameters:
+        - $ref: "#/components/parameters/StartupId"
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Задача с методикой
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [task, ai]
+                properties:
+                  task: { $ref: "#/components/schemas/ActionTask" }
+                  ai: { type: boolean, description: true — методика составлена ИИ }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /startups/{id}/tasks/{taskId}/complete:
+    post:
+      tags: [План действий]
+      summary: Update — внести результат выполнения задачи
+      description: |
+        Результат дописывается в блок карты с датой, карта пересчитывается, в задаче фиксируется
+        статус блока «было → стало» и готовность «было → стало». Если блок всё ещё не подтверждён,
+        в плане появляется следующая задача по нему.
+      operationId: completeTask
+      parameters:
+        - $ref: "#/components/parameters/StartupId"
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [result]
+              properties:
+                result:
+                  type: string
+                  maxLength: 1000
+                  example: Провели 12 интервью, 9 из 12 покупают кофе по пути к метро каждый день
+      responses:
+        "200":
+          description: Карта обновлена
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [startup, update]
+                properties:
+                  startup: { $ref: "#/components/schemas/StartupWithTasks" }
+                  update: { $ref: "#/components/schemas/UpdateResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  # ================= Подбор =================
+
+  /startups/{id}/candidates:
+    get:
+      tags: [Подбор]
+      summary: AI Match — кандидаты под потребность проекта
+      description: |
+        Кандидаты, открывшие профиль основателям, с подходящей целью и сферой.
+        ИИ оценивает каждого: процент соответствия, почему подходит, чего не хватает, что уточнить.
+        Только для опубликованного проекта.
+      operationId: getCandidates
+      parameters: [{ $ref: "#/components/parameters/StartupId" }]
+      responses:
+        "200":
+          description: Кандидаты, лучшие первыми
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [candidates, ai]
+                properties:
+                  ai: { $ref: "#/components/schemas/AiStatus" }
+                  candidates:
+                    type: array
+                    items: { $ref: "#/components/schemas/Candidate" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /startups/{id}/invite:
+    post:
+      tags: [Подбор]
+      summary: Пригласить кандидата в проект
+      description: Кандидат получает сообщение от бота в MAX и видит приглашение в разделе «Отклики».
+      operationId: inviteCandidate
+      parameters: [{ $ref: "#/components/parameters/StartupId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: { type: integer, format: int64, example: 910000000002 }
+      responses:
+        "201":
+          description: Приглашение создано
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Invite" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /invites:
+    get:
+      tags: [Подбор]
+      summary: Приглашения, которые я получил
+      operationId: listInvites
+      responses:
+        "200":
+          description: Опубликованные проекты, куда меня пригласили
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [invites]
+                properties:
+                  invites:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/Startup"
+                        - type: object
+                          properties:
+                            invite_id: { type: integer }
+                            invited_at: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /search:
+    post:
+      tags: [Подбор]
+      summary: Поиск проектов кандидатом с оценкой ИИ
+      description: |
+        Фильтр по цели, сфере и стадии, затем ИИ сравнивает каждый проект с профилем кандидата
+        («О себе» из запроса или из профиля). Критерии сохраняются в профиль поиска.
+      operationId: searchStartups
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [goal, category, min_stage]
+              properties:
+                goal: { $ref: "#/components/schemas/Goal" }
+                category: { type: string, enum: [Любая, AI, SaaS, FoodTech, FinTech, EdTech, E-commerce, Другое] }
+                min_stage: { $ref: "#/components/schemas/Stage" }
+                about: { type: string, maxLength: 1500, description: Необязательно — по умолчанию берётся из профиля }
+      responses:
+        "200":
+          description: Подходящие проекты
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [matches, ai]
+                properties:
+                  ai: { $ref: "#/components/schemas/AiStatus" }
+                  matches:
+                    type: array
+                    items:
+                      type: object
+                      required: [startup]
+                      properties:
+                        startup: { $ref: "#/components/schemas/Startup" }
+                        ai: { $ref: "#/components/schemas/AiEvaluation" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ================= Отклики и MATCH =================
+
+  /offers:
+    post:
+      tags: [Отклики и MATCH]
+      summary: Откликнуться на проект
+      description: Основатель получает уведомление от бота в MAX. Имя отправителя берётся из проверенной авторизации.
+      operationId: createOffer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [startup_id, type, message]
+              properties:
+                startup_id: { type: integer, example: 12 }
+                type: { $ref: "#/components/schemas/Goal" }
+                message: { type: string, maxLength: 1000, example: Управлял кофейней 4 года, готов взять операционку }
+      responses:
+        "201":
+          description: Отклик отправлен
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Offer" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /offers/received:
+    get:
+      tags: [Отклики и MATCH]
+      summary: Отклики на мои проекты
+      operationId: listReceivedOffers
+      responses:
+        "200":
+          description: Отклики, новые первыми
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [offers]
+                properties:
+                  offers:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/Offer"
+                        - type: object
+                          properties:
+                            startup_name: { type: string }
+                            sender_avatar_url: { type: string, nullable: true }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /offers/{id}/accept:
+    post:
+      tags: [Отклики и MATCH]
+      summary: Принять отклик — MATCH
+      description: Кандидат получает уведомление, обе стороны видят контакты друг друга.
+      operationId: acceptOffer
+      parameters: [{ $ref: "#/components/parameters/OfferId" }]
+      responses:
+        "200":
+          description: Отклик принят
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OfferDecision" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /offers/{id}/reject:
+    post:
+      tags: [Отклики и MATCH]
+      summary: Отклонить отклик
+      operationId: rejectOffer
+      parameters: [{ $ref: "#/components/parameters/OfferId" }]
+      responses:
+        "200":
+          description: Отклик отклонён
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OfferDecision" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /contacts:
+    get:
+      tags: [Отклики и MATCH]
+      summary: Мои кандидаты после MATCH (для основателя)
+      description: Телефон и e-mail приходят, только если кандидат дал согласие на их показ.
+      operationId: listContacts
+      responses:
+        "200":
+          description: Принятые отклики с контактами кандидатов
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [contacts]
+                properties:
+                  contacts:
+                    type: array
+                    items: { $ref: "#/components/schemas/FounderContact" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /matches:
+    get:
+      tags: [Отклики и MATCH]
+      summary: Проекты, принявшие меня (для кандидата)
+      description: Телефон и e-mail основателя приходят, только если он дал согласие на их показ.
+      operationId: listMatches
+      responses:
+        "200":
+          description: Принятые отклики с контактами основателей
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [matches]
+                properties:
+                  matches:
+                    type: array
+                    items: { $ref: "#/components/schemas/CandidateMatch" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+components:
+
+  securitySchemes:
+    MaxInitData:
+      type: http
+      scheme: bearer
+      bearerFormat: MAX initData
+      description: Строка window.WebApp.initData из MAX Bridge
+    TestToken:
+      type: apiKey
+      in: header
+      name: X-Test-Token
+      description: Только для автоматической проверки — открывает тестовых пользователей
+
+  parameters:
+    StartupId:
+      name: id
+      in: path
+      required: true
+      description: id проекта
+      schema: { type: integer, minimum: 1 }
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      description: id задачи плана действий
+      schema: { type: integer, minimum: 1 }
+    OfferId:
+      name: id
+      in: path
+      required: true
+      description: id отклика
+      schema: { type: integer, minimum: 1 }
+
+  responses:
+    BadRequest:
+      description: Некорректные данные
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: "Поле \"customer\" обязательно" }
+    Unauthorized:
+      description: Нет авторизации или initData устарел
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: Нет доступа
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Не найдено или чужой объект
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: Действие уже выполнено или недоступно в текущем состоянии
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    ServerError:
+      description: Внутренняя ошибка
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+    Goal:
+      type: string
+      enum: [team, partner]
+      description: team — войти в команду / co-founder, partner — партнёрство
+
+    Stage:
+      type: string
+      enum: [Идея, Прототип, MVP, Первые продажи, Масштабирование]
+
+    BlockStatus:
+      type: string
+      enum: [confirmed, hypothesis, missing]
+      description: confirmed — подтверждено фактами, hypothesis — гипотеза, missing — не проработано
+
+    # ---------- профиль ----------
+
+    ProfileInput:
+      type: object
+      required: [last_name, first_name, email, phone, goal, about, consent]
+      properties:
+        last_name: { type: string, maxLength: 80, example: Иванов }
+        first_name: { type: string, maxLength: 80, example: Иван }
+        patronymic: { type: string, maxLength: 80, example: Иванович }
+        email: { type: string, format: email, maxLength: 200, example: ivan@example.com }
+        phone: { type: string, example: "+7 (900) 123-45-67", description: Российский номер, любой формат }
+        goal: { $ref: "#/components/schemas/Goal" }
+        category: { type: string, default: Любая, enum: [Любая, AI, SaaS, FoodTech, FinTech, EdTech, E-commerce, Другое] }
+        about: { type: string, maxLength: 1500, example: 4 года управлял рестораном, отвечал за персонал и поставщиков }
+        visible: { type: boolean, default: false, description: Показывать профиль основателям для приглашений }
+        consent:
+          type: boolean
+          enum: [true]
+          description: Согласие показать ФИО, телефон и e-mail тому, с кем случится MATCH
+
+    Profile:
+      type: object
+      required: [last_name, first_name, email, phone, goal, about, visible, consent]
+      properties:
+        name: { type: string, nullable: true, description: Имя из MAX }
+        last_name: { type: string }
+        first_name: { type: string }
+        patronymic: { type: string }
+        full_name: { type: string }
+        email: { type: string }
+        phone: { type: string, example: "+79001234567" }
+        goal: { allOf: [{ $ref: "#/components/schemas/Goal" }], nullable: true }
+        category: { type: string }
+        about: { type: string }
+        visible: { type: boolean }
+        consent: { type: boolean }
+        avatar_url: { type: string, nullable: true, example: /api/avatars/40325a61471224918d3c7bffa2508c3c }
+
+    # ---------- проекты ----------
+
+    IdeaFieldsPatch:
+      type: object
+      minProperties: 1
+      description: Поля Idea Check, до 3000 символов каждое
+      properties:
+        customer: { type: string, maxLength: 3000 }
+        problem: { type: string, maxLength: 3000 }
+        solution: { type: string, maxLength: 3000 }
+        partner_needed: { type: string, maxLength: 3000 }
+        competitors: { type: string, maxLength: 3000, nullable: true }
+        traction: { type: string, maxLength: 3000, nullable: true }
+        business_model: { type: string, maxLength: 3000, nullable: true }
+        economics: { type: string, maxLength: 3000, nullable: true }
+
+    StartupInput:
+      type: object
+      required: [name, category, market_type, stage, seeking, customer, problem, solution, partner_needed]
+      properties:
+        name: { type: string, maxLength: 100, example: Кофейня у дома }
+        category: { type: string, enum: [AI, SaaS, FoodTech, FinTech, EdTech, E-commerce, Другое] }
+        market_type: { type: string, enum: [B2B, B2C, B2B2C] }
+        stage: { $ref: "#/components/schemas/Stage" }
+        seeking: { type: string, enum: [Команда / co-founder, Партнёрство] }
+        customer: { type: string, maxLength: 1000, description: Целевая аудитория }
+        problem: { type: string, maxLength: 1000 }
+        solution: { type: string, maxLength: 1000 }
+        partner_needed: { type: string, maxLength: 1000, description: Какой партнёр нужен }
+        competitors: { type: string, maxLength: 1000, nullable: true }
+        traction: { type: string, maxLength: 1000, nullable: true, description: Как проверяли спрос }
+        business_model: { type: string, maxLength: 1000, nullable: true }
+        economics: { type: string, maxLength: 1000, nullable: true }
+
+    MapBlock:
+      type: object
+      required: [status, comment]
+      properties:
+        status: { $ref: "#/components/schemas/BlockStatus" }
+        comment: { type: string, description: Что проверить дальше }
+
+    IdeaMap:
+      type: object
+      description: Карта проекта — 7 блоков
+      required: [audience, problem, solution, competitors, demand, model, economics]
+      properties:
+        audience: { $ref: "#/components/schemas/MapBlock" }
+        problem: { $ref: "#/components/schemas/MapBlock" }
+        solution: { $ref: "#/components/schemas/MapBlock" }
+        competitors: { $ref: "#/components/schemas/MapBlock" }
+        demand: { $ref: "#/components/schemas/MapBlock" }
+        model: { $ref: "#/components/schemas/MapBlock" }
+        economics: { $ref: "#/components/schemas/MapBlock" }
+        _source: { type: string, enum: [ai, rules], description: Построена ИИ или по правилам }
+
+    Startup:
+      type: object
+      required: [id, founder_id, name, category, market_type, stage, seeking, status]
+      properties:
+        id: { type: integer }
+        founder_id: { type: integer, format: int64 }
+        name: { type: string }
+        category: { type: string }
+        market_type: { type: string }
+        stage: { $ref: "#/components/schemas/Stage" }
+        seeking: { type: string }
+        status: { type: string, enum: [draft, published] }
+        customer: { type: string, nullable: true }
+        problem: { type: string, nullable: true }
+        solution: { type: string, nullable: true }
+        competitors: { type: string, nullable: true }
+        traction: { type: string, nullable: true }
+        business_model: { type: string, nullable: true }
+        economics: { type: string, nullable: true }
+        partner_needed: { type: string, nullable: true }
+        idea_map: { allOf: [{ $ref: "#/components/schemas/IdeaMap" }], nullable: true }
+        readiness: { type: integer, minimum: 0, maximum: 100, nullable: true, description: Готовность проекта в процентах }
+        created_at: { type: string, format: date-time }
+
+    StartupWithTasks:
+      allOf:
+        - $ref: "#/components/schemas/Startup"
+        - type: object
+          required: [tasks]
+          properties:
+            tasks:
+              type: array
+              description: Сначала открытые задачи в порядке блоков карты, затем выполненные
+              items: { $ref: "#/components/schemas/ActionTask" }
+
+    # ---------- план действий ----------
+
+    ActionTask:
+      type: object
+      required: [id, block_id, block_title, title, method, method_source, status]
+      properties:
+        id: { type: integer }
+        block_id: { type: string, enum: [audience, problem, solution, competitors, demand, model, economics] }
+        block_title: { type: string, example: Проверка спроса }
+        title: { type: string, example: Проверить спрос }
+        method:
+          type: array
+          items: { type: string }
+          description: Шаги методики
+        method_source: { type: string, enum: [template, ai] }
+        result_hint: { type: string, description: Пример результата, который засчитывается как факт }
+        status: { type: string, enum: [open, done] }
+        result: { type: string, nullable: true }
+        status_before: { allOf: [{ $ref: "#/components/schemas/BlockStatus" }], nullable: true }
+        status_after: { allOf: [{ $ref: "#/components/schemas/BlockStatus" }], nullable: true }
+        readiness_before: { type: integer, nullable: true }
+        readiness_after: { type: integer, nullable: true }
+        created_at: { type: string, format: date-time }
+        done_at: { type: string, format: date-time, nullable: true }
+
+    UpdateResult:
+      type: object
+      required: [task_id, block_id, block_title, status_before, status_after, readiness_before, readiness_after]
+      properties:
+        task_id: { type: integer }
+        block_id: { type: string }
+        block_title: { type: string }
+        status_before: { $ref: "#/components/schemas/BlockStatus" }
+        status_after: { $ref: "#/components/schemas/BlockStatus" }
+        readiness_before: { type: integer }
+        readiness_after: { type: integer }
+        comment: { type: string, description: Совет по блоку после пересчёта }
+
+    # ---------- ИИ ----------
+
+    AiStatus:
+      type: object
+      properties:
+        status: { type: string, enum: [ok, partial, disabled, no_profile, error] }
+        message: { type: string, nullable: true }
+
+    AiEvaluation:
+      type: object
+      nullable: true
+      properties:
+        score: { type: integer, minimum: 0, maximum: 100 }
+        verdict: { type: string, enum: [strong, partial, weak] }
+        reasons: { type: array, items: { type: string }, description: Почему подходит }
+        missing: { type: array, items: { type: string }, description: Чего не хватает }
+        clarify: { type: array, items: { type: string }, description: Что уточнить перед знакомством }
+
+    Candidate:
+      type: object
+      required: [user_id, name, about, invited]
+      properties:
+        user_id: { type: integer, format: int64 }
+        name: { type: string, description: Имя из MAX (ФИО — только после MATCH) }
+        goal: { $ref: "#/components/schemas/Goal" }
+        about: { type: string }
+        avatar_url: { type: string, nullable: true }
+        ai: { $ref: "#/components/schemas/AiEvaluation" }
+        invited: { type: boolean }
+
+    Invite:
+      type: object
+      required: [id, startup_id, user_id]
+      properties:
+        id: { type: integer }
+        startup_id: { type: integer }
+        user_id: { type: integer, format: int64 }
+        created_at: { type: string, format: date-time }
+
+    # ---------- отклики ----------
+
+    Offer:
+      type: object
+      required: [id, startup_id, sender_id, type, message, status]
+      properties:
+        id: { type: integer }
+        startup_id: { type: integer }
+        sender_id: { type: integer, format: int64 }
+        sender_name: { type: string, nullable: true }
+        type: { type: string, example: "👥 Присоединиться к команде" }
+        message: { type: string }
+        status: { type: string, enum: [new, accepted, rejected] }
+        created_at: { type: string, format: date-time }
+
+    OfferDecision:
+      allOf:
+        - $ref: "#/components/schemas/Offer"
+        - type: object
+          properties:
+            startup_name: { type: string }
+            founder_id: { type: integer, format: int64 }
+
+    FounderContact:
+      type: object
+      required: [offer_id, candidate_id, candidate_name, startup_id, startup_name]
+      properties:
+        offer_id: { type: integer }
+        candidate_id: { type: integer, format: int64 }
+        candidate_name: { type: string, nullable: true }
+        candidate_phone: { type: string, nullable: true }
+        candidate_email: { type: string, nullable: true }
+        candidate_avatar_url: { type: string, nullable: true }
+        type: { type: string }
+        message: { type: string }
+        created_at: { type: string, format: date-time }
+        startup_id: { type: integer }
+        startup_name: { type: string }
+
+    CandidateMatch:
+      type: object
+      required: [offer_id, startup_id, startup_name, founder_id]
+      properties:
+        offer_id: { type: integer }
+        type: { type: string }
+        message: { type: string }
+        created_at: { type: string, format: date-time }
+        startup_id: { type: integer }
+        startup_name: { type: string }
+        founder_id: { type: integer, format: int64 }
+        founder_name: { type: string, nullable: true }
+        founder_phone: { type: string, nullable: true }
+        founder_email: { type: string, nullable: true }
+        founder_avatar_url: { type: string, nullable: true }
