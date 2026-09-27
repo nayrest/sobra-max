@@ -416,6 +416,7 @@ paths:
               schema: { $ref: "#/components/schemas/Startup" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/ProfileRequired" }
 
   # ================= План действий =================
 
@@ -634,6 +635,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/ProfileRequired" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /offers/received:
@@ -904,6 +906,18 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    ProfileRequired:
+      description: >-
+        Профиль не заполнен. Профиль на входе не обязателен — контакты (ФИО, телефон, e-mail, согласие)
+        спрашиваются только перед публикацией проекта и перед откликом, когда без них не случится MATCH.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - { $ref: "#/components/schemas/Error" }
+              - type: object
+                properties:
+                  code: { type: string, enum: [profile_required] }
     TooManyRequests:
       description: Превышен суточный лимит действий
       content:
@@ -923,6 +937,12 @@ components:
       required: [error]
       properties:
         error: { type: string }
+        code: { type: string, description: Машиночитаемая причина ошибки, если есть (например profile_required) }
+
+    ProfileGoal:
+      type: string
+      enum: [own, team, partner]
+      description: own — развиваю свою идею (не показывается основателям, «О себе» необязательно), team — войти в команду, partner — партнёрство
 
     Goal:
       type: string
@@ -942,16 +962,16 @@ components:
 
     ProfileInput:
       type: object
-      required: [last_name, first_name, email, phone, goal, about, consent]
+      required: [last_name, first_name, email, phone, goal, consent]
       properties:
         last_name: { type: string, maxLength: 80, example: Иванов }
         first_name: { type: string, maxLength: 80, example: Иван }
         patronymic: { type: string, maxLength: 80, example: Иванович }
         email: { type: string, format: email, maxLength: 200, example: ivan@example.com }
         phone: { type: string, example: "+7 (900) 123-45-67", description: Российский номер, любой формат }
-        goal: { $ref: "#/components/schemas/Goal" }
+        goal: { $ref: "#/components/schemas/ProfileGoal" }
         category: { type: string, default: Любая, enum: [Любая, AI, SaaS, FoodTech, FinTech, EdTech, E-commerce, Другое] }
-        about: { type: string, maxLength: 1500, example: 4 года управлял рестораном, отвечал за персонал и поставщиков }
+        about: { type: string, maxLength: 1500, description: Обязательно для team и partner, example: 4 года управлял рестораном, отвечал за персонал и поставщиков }
         visible: { type: boolean, default: false, description: Показывать профиль основателям для приглашений }
         consent:
           type: boolean
@@ -974,7 +994,7 @@ components:
         full_name: { type: string }
         email: { type: string }
         phone: { type: string, example: "+79001234567" }
-        goal: { allOf: [{ $ref: "#/components/schemas/Goal" }], nullable: true }
+        goal: { allOf: [{ $ref: "#/components/schemas/ProfileGoal" }], nullable: true }
         category: { type: string }
         about: { type: string }
         visible: { type: boolean }

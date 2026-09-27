@@ -15,9 +15,10 @@ const initData = WebApp && WebApp.initData ? WebApp.initData : "";
 const debugUserId = new URLSearchParams(location.search).get("debug_user");
 
 class ApiError extends Error {
-  constructor(status, message) {
+  constructor(status, message, code = null) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -43,7 +44,7 @@ async function api(method, path, body) {
   }
 
   if (!response.ok) {
-    throw new ApiError(response.status, (data && data.error) || `Ошибка сервера (${response.status})`);
+    throw new ApiError(response.status, (data && data.error) || `Ошибка сервера (${response.status})`, data && data.code);
   }
   return data;
 }
@@ -77,6 +78,7 @@ const STATUS = {
 const GOALS = {
   team: "Войти в команду",
   partner: "Партнёрство",
+  own: "Развивает свою идею",
 };
 
 const CATEGORY_ICON = {
@@ -376,6 +378,11 @@ document.addEventListener("visibilitychange", () => {
 
 function show(view) {
   if (!dockMq.matches) setNav(false);
+  // Ушли с профиля, не сохранив, — отложенное действие (публикация, отклик) отменяется
+  if (view !== "profile") {
+    state.afterProfile = null;
+    state.profileReason = null;
+  }
   if (BADGE_SECTIONS[view]) markSeen(view);
   else refreshCounters();
   document.querySelectorAll(".view").forEach((v) => (v.hidden = true));
@@ -392,11 +399,6 @@ function show(view) {
 function setupNavigation() {
   document.querySelectorAll("#tabbar button").forEach((b) =>
     b.addEventListener("click", () => {
-      if (state.onboarding && b.dataset.tab !== "profile") {
-        toast("Сначала заполните профиль");
-        show("profile");
-        return;
-      }
       show(b.dataset.tab);
     })
   );
@@ -807,8 +809,11 @@ function renderProject(s) {
     $("go-match").addEventListener("click", () => show("match"));
   } else {
     $("publish-project").addEventListener("click", async (e) => {
+      const button = e.currentTarget;
+      const again = () => { state.currentProjectId = s.id; show("project"); };
+      if (!(await requireProfile("Чтобы опубликовать проект, заполните профиль.", again))) return;
       try {
-        await busy(e.currentTarget, "Публикуем…", () => api("POST", `/api/startups/${s.id}/publish`));
+        await busy(button, "Публикуем…", () => api("POST", `/api/startups/${s.id}/publish`));
         toast("Проект опубликован. Теперь можно подобрать партнёра.");
         loadProject(s.id);
       } catch (error) {
@@ -1344,10 +1349,14 @@ async function loadProfile() {
 
   const head = document.querySelector("#view-profile .page-head");
   if (head) {
-    if (state.onboarding) {
-      head.querySelector("h1").textContent = "Создание профиля";
+    if (state.profileReason) {
+      head.querySelector("h1").textContent = "Заполните профиль";
       head.querySelector("p").textContent =
-        "При первом входе заполните профиль кандидата. По этим данным ИИ будет подбирать проекты, а основатели — находить вас.";
+        `${state.profileReason} Контакты увидит только тот, с кем у вас случится MATCH, — до этого их не видит никто.`;
+    } else if (!isProfileComplete(state.profile)) {
+      head.querySelector("h1").textContent = "Мой профиль";
+      head.querySelector("p").textContent =
+        "Профиль понадобится, когда захотите опубликовать проект или откликнуться на чужой. Проверять идеи и искать проекты можно и без него.";
     } else {
       head.querySelector("h1").textContent = "Мой профиль";
       head.querySelector("p").textContent =
@@ -1367,6 +1376,7 @@ async function loadProfile() {
     form.elements.about.value = p.about || "";
     form.elements.visible.checked = p.visible;
     form.elements.consent.checked = Boolean(p.consent);
+    syncGoalFields();
     form.elements.max_link.value = p.max_link || "";
     state.verifiedPhone = p.phone_verified ? formatRuPhone(p.phone) : null;
     updatePhoneStatus();
@@ -1379,9 +1389,29 @@ async function loadProfile() {
   }
 }
 
+// Для цели «Развиваю свою идею» «О себе» необязательно, а показ профиля основателям не нужен
+function syncGoalFields() {
+  const own = $("profile-form").elements.goal.value === "own";
+  $("about-required").hidden = own;
+  $("visible-field").hidden = own;
+}
+
+// Контакты нужны только для MATCH, поэтому профиль спрашиваем не на входе, а в момент,
+// когда без него не обойтись. reason — зачем он нужен, next — куда вернуться после сохранения.
+async function requireProfile(reason, next) {
+  const profile = state.profile || (await fetchProfile().catch(() => null));
+  if (isProfileComplete(profile)) return true;
+  state.profileReason = reason;
+  state.afterProfile = next;
+  show("profile");
+  toast("Сначала заполните профиль — это займёт минуту");
+  return false;
+}
+
 function setupProfileForm() {
   const form = $("profile-form");
   setupPhoneMask(form.elements.phone);
+  form.elements.goal.addEventListener("change", syncGoalFields);
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -1414,7 +1444,7 @@ function setupProfileForm() {
       formError("profile-error", new Error("Выберите, чего хотите."));
       return;
     }
-    if (!f.about.value.trim()) {
+    if (f.goal.value !== "own" && !f.about.value.trim()) {
       f.about.focus();
       formError("profile-error", new Error("Расскажите о себе хотя бы в паре предложений — по этому тексту ИИ подбирает проекты."));
       return;
@@ -1444,23 +1474,20 @@ function setupProfileForm() {
           category: f.category.value,
           about: f.about.value.trim(),
           max_link: maxLink,
-          visible: f.visible.checked,
+          visible: f.goal.value !== "own" && f.visible.checked,
           consent: true,
         })
       );
       updateUserbox(state.profile);
-      const wasOnboarding = state.onboarding;
-      state.onboarding = false;
-      toast(
-        wasOnboarding
-          ? "Профиль создан! Теперь можно искать проекты и публиковать свои идеи."
-          : f.visible.checked
-            ? "Профиль сохранён. Основатели смогут вас пригласить."
-            : "Профиль сохранён."
-      );
-      if (wasOnboarding) {
-        show("projects");
-        startCounters();
+      // Профиль заполняли по пути (публикация, отклик) — возвращаем человека туда, где он был
+      const next = state.afterProfile;
+      state.afterProfile = null;
+      state.profileReason = null;
+      if (next) {
+        toast("Профиль сохранён. Продолжаем.");
+        next();
+      } else {
+        toast(f.visible.checked && f.goal.value !== "own" ? "Профиль сохранён. Основатели смогут вас пригласить." : "Профиль сохранён.");
       }
     } catch (error) {
       formError("profile-error", error);
@@ -1477,7 +1504,7 @@ async function prepareSearch() {
   const hint = $("search-ai-hint");
   try {
     const p = state.profile || (await fetchProfile());
-    if (!form.elements.goal.value && p.goal) form.elements.goal.value = p.goal;
+    if (!form.elements.goal.value && p.goal && p.goal !== "own") form.elements.goal.value = p.goal;
     hint.innerHTML = p.about
       ? "✨ ИИ сравнит каждый проект с вашим профилем и объяснит, насколько вы подходите."
       : `✨ Заполните <button class="text-btn" type="button" id="to-profile">профиль</button>, и ИИ объяснит, насколько вы подходите каждому проекту.`;
@@ -1565,7 +1592,10 @@ function projectForCandidate(s, ai) {
 
 function respondClick(event) {
   const button = event.target.closest("[data-respond]");
-  if (button) openOfferSheet(button.dataset.respond, button.dataset.name, "demo" in button.dataset);
+  if (!button) return;
+  const open = () => openOfferSheet(button.dataset.respond, button.dataset.name, "demo" in button.dataset);
+  const back = button.closest(".view")?.id.replace("view-", "") || "search"; // вернуться на тот же экран
+  requireProfile("Чтобы откликнуться на проект, заполните профиль.", () => { show(back); open(); }).then((ok) => ok && open());
 }
 
 function openOfferSheet(startupId, name, isDemo = false) {
@@ -1575,7 +1605,7 @@ function openOfferSheet(startupId, name, isDemo = false) {
   state.offerStartupId = Number(startupId);
   state.offerToDemo = isDemo;
   $("offer-project").textContent = name;
-  const goal = state.lastSearchGoal || state.profile?.goal;
+  const goal = state.lastSearchGoal || (state.profile?.goal !== "own" ? state.profile?.goal : null);
   if (goal) form.elements.type.value = goal;
   $("offer-sheet").hidden = false;
   form.elements.message.focus();
@@ -1787,12 +1817,15 @@ function showAuthError(message) {
   $("user-name").textContent = "Не авторизован";
 }
 
-function needsOnboarding(profile) {
+function isProfileComplete(profile) {
+  return !needsProfile(profile);
+}
+
+function needsProfile(profile) {
   return (
     !profile ||
     !profile.goal ||
-    !profile.about ||
-    !String(profile.about).trim() ||
+    (profile.goal !== "own" && (!profile.about || !String(profile.about).trim())) ||
     !profile.last_name ||
     !String(profile.last_name).trim() ||
     !profile.first_name ||
@@ -1823,16 +1856,10 @@ async function authorize() {
     // Сначала имя из MAX; после загрузки профиля — Фамилия + Имя из профиля
     updateUserbox(null);
 
-    // Первичный вход: если профиль кандидата не заполнен — сразу открываем создание профиля
+    // Профиль на входе не требуем: сначала человек видит пользу (Idea Check, поиск),
+    // а контакты заполняет, когда публикует проект или откликается.
     try {
-      const profile = await fetchProfile();
-      updateUserbox(profile);
-      if (needsOnboarding(profile)) {
-        state.onboarding = true;
-        show("profile");
-        toast("Заполните профиль, чтобы начать работу");
-        return;
-      }
+      updateUserbox(await fetchProfile());
     } catch {
       // если профиль недоступен — всё равно пускаем дальше
     }

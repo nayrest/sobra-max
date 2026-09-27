@@ -183,7 +183,8 @@
           <label class="field"><span>Чего хотите <b class="required">*</b></span>
             <select class="input" name="goal">
               <option value="">Выберите</option>
-              <option value="team">Войти в команду</option>
+              <option value="own">Развиваю свою идею</option>
+              <option value="team">Войти в чужую команду</option>
               <option value="partner">Партнёрство</option>
             </select></label>
           <label class="field"><span>Интересная сфера</span>
@@ -191,13 +192,13 @@
               <option>Любая</option><option>AI</option><option>SaaS</option><option>FoodTech</option>
               <option>FinTech</option><option>EdTech</option><option>E-commerce</option><option>Другое</option>
             </select></label>
-          <label class="field wide"><span>О себе <b class="required">*</b></span>
+          <label class="field wide"><span>О себе <b class="required" id="about-required">*</b></span>
             <textarea class="input textarea" name="about" maxlength="1500" placeholder="Опыт, навыки, сколько времени готовы уделять и какую роль хотите. Например: 4 года управлял рестораном, отвечал за персонал и поставщиков, готов уделять 30 часов в неделю"></textarea></label>
           <label class="check wide">
             <input type="checkbox" name="consent">
             <span>Согласен(на), что мои ФИО, телефон, e-mail и ссылку на профиль в MAX увидит только тот, с кем у меня случится MATCH — когда основатель примет отклик. До этого их не видит никто. <b class="required">*</b></span>
           </label>
-          <label class="check wide">
+          <label class="check wide" id="visible-field">
             <input type="checkbox" name="visible">
             <span>Показывать мой профиль основателям, чтобы они могли пригласить меня в проект</span>
           </label>

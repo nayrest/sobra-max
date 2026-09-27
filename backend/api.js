@@ -27,6 +27,10 @@ const SEEKING = {
   partner: "Партнёрство",
 };
 
+// Цель в профиле. own — человек развивает свою идею и не ищет чужой проект:
+// его не показывают основателям в подборе, «О себе» для него необязательно.
+const PROFILE_GOALS = [...Object.keys(SEEKING), "own"];
+
 // Бот сохраняет тип предложения текстом — API пишет тот же текст,
 // чтобы данные из бота и из мини-аппа не расходились.
 const OFFER_TYPES = {
@@ -39,9 +43,10 @@ const OFFER_TYPES = {
 // ======================================================
 
 class ApiError extends Error {
-  constructor(status, message) {
+  constructor(status, message, code = null) {
     super(message);
     this.status = status;
+    this.code = code; // машиночитаемая причина, например profile_required
   }
 }
 
@@ -359,6 +364,14 @@ function createApi({ notify = {} } = {}) {
     }
   };
 
+  // Контакты нужны только для MATCH. Поэтому профиль спрашиваем не при входе,
+  // а перед публикацией проекта и перед откликом — когда без контактов не обойтись.
+  async function requireCompleteProfile(req, message) {
+    const p = await db.getSearchProfile(req.user.userId);
+    const complete = p && p.contacts_consent_at && p.phone && p.email && p.last_name && p.first_name;
+    if (!complete) throw new ApiError(409, message, "profile_required");
+  }
+
   // ---------- демо-автоответы ----------
   // Через несколько секунд после отклика на демо-проект или приглашения демо-кандидата
   // сервер отвечает за вымышленного человека. Раз в минуту — проверка на случай перезапуска.
@@ -674,6 +687,7 @@ function createApi({ notify = {} } = {}) {
   app.post("/api/startups/:id/publish", wrap(async (req, res) => {
     const startup = await getOwnStartup(req);
     if (startup.status === "published") return res.json(startup);
+    await requireCompleteProfile(req, "Чтобы опубликовать проект, заполните профиль: контакты увидит только тот, с кем случится MATCH.");
 
     const published = await db.publishStartup(startup.id, req.user.userId);
     res.json(published);
@@ -703,13 +717,12 @@ function createApi({ notify = {} } = {}) {
     };
 
     // «О себе» для AI Matching: из запроса, а если не передано — из профиля кандидата
-    let about = optionalText(body, "about", 1500);
-    if (!about) {
-      const profile = await db.getSearchProfile(req.user.userId);
-      about = profile?.about || null;
-    }
+    const profile = await db.getSearchProfile(req.user.userId);
+    const about = optionalText(body, "about", 1500) || profile?.about || null;
 
-    await db.saveSearchProfile(req.user.userId, { ...criteria, about });
+    // Цель «развиваю свою идею» поиск не меняет: человек просто смотрит чужие проекты
+    const savedGoal = profile?.goal === "own" ? "own" : goal;
+    await db.saveSearchProfile(req.user.userId, { ...criteria, goal: savedGoal, about });
     const found = await db.findMatches(criteria, req.user.userId);
 
     // ИИ оценивает только то, что прошло фильтры. При сбое ИИ поиск всё равно отвечает.
@@ -807,9 +820,9 @@ function createApi({ notify = {} } = {}) {
       throw new ApiError(400, "Укажите российский номер телефона: +7 XXX XXX-XX-XX");
     }
 
-    const goal = requireOneOf(body.goal, Object.keys(SEEKING), "goal");
-    const about = requireText(body, "about", 1500);
-    const visible = body.visible === true;
+    const goal = requireOneOf(body.goal, PROFILE_GOALS, "goal");
+    const about = goal === "own" ? optionalText(body, "about", 1500) || "" : requireText(body, "about", 1500);
+    const visible = goal !== "own" && body.visible === true;
 
     // Без согласия не сохраняем контакты: их увидит тот, с кем случится MATCH
     if (body.consent !== true) {
@@ -1013,6 +1026,7 @@ function createApi({ notify = {} } = {}) {
     const startup = await db.getPublishedStartupById(startupId);
     if (!startup) throw new ApiError(404, "Проект больше недоступен");
     if (Number(startup.founder_id) === req.user.userId) throw new ApiError(400, "Нельзя откликнуться на свой проект");
+    await requireCompleteProfile(req, "Чтобы откликнуться, заполните профиль: контакты увидит только основатель, если примет отклик.");
     await enforceDailyLimit(req, "offers");
 
     // Имя берём из проверенного initData, а не из тела запроса — его нельзя подделать
@@ -1111,7 +1125,7 @@ function createApi({ notify = {} } = {}) {
   // eslint-disable-next-line no-unused-vars
   app.use((err, req, res, next) => {
     if (err instanceof ApiError) {
-      return res.status(err.status).json({ error: err.message });
+      return res.status(err.status).json(err.code ? { error: err.message, code: err.code } : { error: err.message });
     }
     if (err.type === "entity.parse.failed") {
       return res.status(400).json({ error: "Некорректный JSON в теле запроса" });
