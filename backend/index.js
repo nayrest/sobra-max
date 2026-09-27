@@ -2,7 +2,7 @@ require("dotenv").config();
 
 const { Bot } = require("@maxhub/max-bot-api");
 const db = require("./db");
-const { createApi } = require("./api");
+const { createApi, publishEvent } = require("./api");
 const aiMatching = require("./ai-matching");
 
 const TOKEN = process.env.BOT_TOKEN;
@@ -39,7 +39,9 @@ const INSTRUCTION =
 
 const HINT =
   "Я не веду диалог в чате: вся работа с проектами — в мини-приложении SOBRA.\n\n" +
-  "Откройте его в этом чате. Инструкция — по команде /start.";
+  "Откройте его в этом чате. Инструкция — по команде /start.\n\n" +
+  "💬 Чтобы после MATCH у собеседника появилась кнопка «Написать в MAX», перешлите сюда ссылку на свой профиль: " +
+  "профиль MAX → «Пригласить в друзья» → «Поделиться» → этот чат.";
 
 async function sendInstruction(ctx) {
   const userId = ctx.user?.user_id;
@@ -64,13 +66,49 @@ bot.on("bot_started", async (ctx) => {
   }
 });
 
+// Ссылка на профиль MAX: https://max.ru/<ник> или https://max.ru/u/<код приглашения>.
+// Её нельзя получить через API, поэтому человек пересылает боту приглашение из своего профиля
+// («Пригласить в друзья» → «Поделиться» → чат с ботом). Ищем ссылку в тексте и во вложениях.
+const MAX_LINK_RE = /https:\/\/(?:www\.)?max\.ru\/[A-Za-z0-9_.\-\/]+/;
+
+function findMaxLink(message) {
+  const body = message?.body || {};
+  const haystack = [body.text || "", JSON.stringify(body.attachments || []), JSON.stringify(body.markup || [])].join(" ");
+  const match = haystack.match(MAX_LINK_RE);
+  if (!match) return null;
+  const link = match[0].replace(/[.\-\/]+$/, "");
+  // Ссылку на самого бота или на мини-приложение сохранять незачем
+  if (/max\.ru\/[^/]*_bot\b/i.test(link)) return null;
+  return link.length <= 300 ? link : null;
+}
+
+const LINK_SAVED =
+  "✅ Ссылка на ваш профиль MAX сохранена.\n\n" +
+  "После MATCH у собеседника появится кнопка «Написать в MAX». " +
+  "Изменить или удалить ссылку можно в мини-приложении, вкладка «Профиль».";
+
 bot.on("message_created", async (ctx) => {
-  const text = ctx.message?.body?.text?.trim();
+  const text = ctx.message?.body?.text?.trim() || "";
 
   // Команды (/start и т.п.) обрабатываются отдельно
-  if (!text || text.startsWith("/")) return;
+  if (text.startsWith("/")) return;
 
   try {
+    const userId = ctx.user?.user_id || ctx.message?.sender?.user_id;
+    const link = userId ? findMaxLink(ctx.message) : null;
+    if (link) {
+      await db.ensureUser(userId);
+      await db.saveMaxLink(userId, link);
+      publishEvent(userId, "profile"); // открытый профиль в мини-приложении обновится сам
+      await ctx.reply(LINK_SAVED);
+      return;
+    }
+    if (!text) {
+      // Вложение без ссылки — пишем тип в лог, чтобы понять формат «Поделиться» в живом MAX
+      const types = (ctx.message?.body?.attachments || []).map((a) => a.type).join(", ");
+      if (types) console.log(`ℹ️  Сообщение боту без ссылки, вложения: ${types}`);
+      else return;
+    }
     await ctx.reply(HINT);
   } catch (error) {
     console.error("❌ Ошибка ответа на сообщение:", error.message);

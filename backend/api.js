@@ -1138,4 +1138,4 @@ function createApi({ notify = {} } = {}) {
   return app;
 }
 
-module.exports = { createApi, validateInitData };
+module.exports = { createApi, validateInitData, publishEvent };

@@ -177,9 +177,15 @@
             <input class="input" id="profile-phone" name="phone" type="tel" maxlength="18" placeholder="+7 (900) 123-45-67" inputmode="tel" autocomplete="tel">
             <span class="phone-status verified" id="phone-verified" hidden>✓ Подтверждён через MAX</span>
             <button class="text-btn" type="button" id="phone-verify" hidden>✓ Подтвердить номер через MAX</button></div>
-          <label class="field"><span>Ссылка на профиль в MAX</span>
-            <input class="input" name="max_link" maxlength="300" placeholder="https://max.ru/ваш_ник" inputmode="url" autocomplete="url">
-            <small class="field-hint" id="max-link-hint">Необязательно. Нужна для кнопки «Написать в MAX» после MATCH. В MAX: профиль → QR-код → «Поделиться».</small></label>
+          <div class="field max-link-field">
+            <span class="field-title">Кнопка «Написать в MAX»</span>
+            <p class="max-link-status" id="max-link-status"></p>
+            <button class="text-btn" type="button" id="max-link-toggle">Указать ссылку вручную</button>
+            <label class="max-link-manual" id="max-link-manual" hidden>
+              <input class="input" name="max_link" maxlength="300" placeholder="https://max.ru/…" inputmode="url" autocomplete="url">
+              <small class="field-hint">Пустое поле — удалить ссылку.</small>
+            </label>
+          </div>
           <label class="field"><span>Чего хотите <b class="required">*</b></span>
             <select class="input" name="goal">
               <option value="">Выберите</option>

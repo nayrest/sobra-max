@@ -348,6 +348,7 @@ async function connectEvents() {
     const { ticket } = await api("GET", "/api/events/ticket");
     eventSource = new EventSource(`/api/events?ticket=${encodeURIComponent(ticket)}`);
     eventSource.addEventListener("counters", onServerEvent);
+    eventSource.addEventListener("profile", onProfileEvent);
     eventSource.addEventListener("ready", refreshCounters);
     eventSource.onerror = () => {
       // Пропуск живёт 5 минут: при обрыве берём новый и переподключаемся
@@ -1377,15 +1378,50 @@ async function loadProfile() {
     form.elements.visible.checked = p.visible;
     form.elements.consent.checked = Boolean(p.consent);
     syncGoalFields();
-    form.elements.max_link.value = p.max_link || "";
+    renderMaxLink(p);
     state.verifiedPhone = p.phone_verified ? formatRuPhone(p.phone) : null;
     updatePhoneStatus();
-    $("max-link-hint").textContent = p.max_username
-      ? `Необязательно: у вас в MAX есть ник @${p.max_username}, ссылка https://max.ru/${p.max_username} подставится сама. Заполните, только если хотите указать другую.`
-      : "Необязательно. Нужна для кнопки «Написать в MAX» после MATCH. В MAX: профиль → QR-код → «Поделиться».";
     updateUserbox(p);
   } catch (error) {
     formError("profile-error", error);
+  }
+}
+
+// Кнопка «Написать в MAX» у собеседника после MATCH. Ссылку на профиль MAX нельзя узнать
+// через API, поэтому: есть ник — ссылка строится сама; нет — человек пересылает боту
+// приглашение из своего профиля, бот сохраняет ссылку, и этот блок обновляется сам (событие profile).
+function renderMaxLink(p) {
+  const status = $("max-link-status");
+  const form = $("profile-form");
+  form.elements.max_link.value = p.max_link || "";
+  $("max-link-manual").hidden = true;
+  $("max-link-toggle").hidden = false;
+  if (p.max_link) {
+    status.className = "max-link-status ok";
+    status.textContent = "✓ Настроена: ссылка на ваш профиль MAX сохранена.";
+    $("max-link-toggle").textContent = "Изменить или удалить ссылку";
+  } else if (p.max_username) {
+    status.className = "max-link-status ok";
+    status.textContent = `✓ Настроена автоматически по вашему нику @${p.max_username}.`;
+    $("max-link-toggle").textContent = "Указать другую ссылку";
+  } else {
+    status.className = "max-link-status";
+    status.innerHTML =
+      "Чтобы после MATCH с вами можно было сразу написать в MAX, перешлите боту ссылку на свой профиль: " +
+      "<b>профиль MAX → «Пригласить в друзья» → «Поделиться» → чат с ботом SOBRA</b>. " +
+      "Бот сохранит её сам, здесь ничего вставлять не нужно. Без ссылки с вами свяжутся по телефону или e-mail.";
+    $("max-link-toggle").textContent = "Указать ссылку вручную";
+  }
+}
+
+// Бот сохранил ссылку, пока мини-приложение было открыто, — обновляем блок без перезагрузки
+async function onProfileEvent() {
+  try {
+    const p = await fetchProfile();
+    if (!$("view-profile").hidden) renderMaxLink(p);
+    if (p.max_link) toast("Ссылка на профиль MAX сохранена ✓");
+  } catch {
+    /* не критично */
   }
 }
 
@@ -1412,6 +1448,11 @@ function setupProfileForm() {
   const form = $("profile-form");
   setupPhoneMask(form.elements.phone);
   form.elements.goal.addEventListener("change", syncGoalFields);
+  $("max-link-toggle").addEventListener("click", () => {
+    $("max-link-manual").hidden = false;
+    $("max-link-toggle").hidden = true;
+    form.elements.max_link.focus();
+  });
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -1449,10 +1490,12 @@ function setupProfileForm() {
       formError("profile-error", new Error("Расскажите о себе хотя бы в паре предложений — по этому тексту ИИ подбирает проекты."));
       return;
     }
+    // Ссылку отправляем, только если её правили вручную: иначе можно стереть ту, что прислали боту
+    const manual = !$("max-link-manual").hidden;
     const maxLink = f.max_link.value.trim();
-    if (maxLink && !/^(https?:\/\/)?(www\.)?(max\.ru|max\.me)\/\S+$/i.test(maxLink)) {
+    if (manual && maxLink && !/^(https?:\/\/)?(www\.)?(max\.ru|max\.me)\/\S+$/i.test(maxLink)) {
       f.max_link.focus();
-      formError("profile-error", new Error("Ссылка на профиль MAX должна начинаться с https://max.ru/ — скопируйте её в MAX: профиль → QR-код → «Поделиться»."));
+      formError("profile-error", new Error("Ссылка на профиль MAX должна начинаться с https://max.ru/"));
       return;
     }
     if (!f.consent.checked) {
@@ -1473,12 +1516,13 @@ function setupProfileForm() {
           goal: f.goal.value,
           category: f.category.value,
           about: f.about.value.trim(),
-          max_link: maxLink,
+          ...(manual ? { max_link: maxLink } : {}),
           visible: f.goal.value !== "own" && f.visible.checked,
           consent: true,
         })
       );
       updateUserbox(state.profile);
+      renderMaxLink(state.profile);
       // Профиль заполняли по пути (публикация, отклик) — возвращаем человека туда, где он был
       const next = state.afterProfile;
       state.afterProfile = null;

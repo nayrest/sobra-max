@@ -73,10 +73,12 @@ async function ensureUser(userId, name = null, username = null) {
   );
 }
 
-// Ссылка на профиль в MAX, указанная вручную (null — очистить)
+// Ссылка на профиль в MAX (null — очистить). Её присылают боту или вставляют вручную.
+// Профиля может ещё не быть (он заполняется при публикации или отклике) — тогда создаём строку.
 async function saveMaxLink(userId, link) {
   await pool.query(
-    `UPDATE search_profiles SET max_link = $2 WHERE user_id = $1`,
+    `INSERT INTO search_profiles (user_id, max_link) VALUES ($1, $2)
+     ON CONFLICT (user_id) DO UPDATE SET max_link = EXCLUDED.max_link`,
     [userId, link]
   );
 }
