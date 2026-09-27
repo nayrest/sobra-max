@@ -82,7 +82,14 @@ const GOALS = {
 };
 
 const CATEGORY_ICON = {
-  FoodTech: "☕", AI: "🤖", SaaS: "☁️", FinTech: "💳", EdTech: "🎓", "E-commerce": "🛒", Другое: "💡",
+  "Ресторан / кафе / кофейня": "☕", "Магазин / E-commerce": "🛒", Услуги: "🛠️", Производство: "🏭",
+  Образование: "🎓", Финансы: "💳", "Технологии / IT / SaaS": "💻", "AI / ИИ": "🤖",
+  "Маркетинг / медиа": "📣", "Логистика / доставка": "🚚", Другое: "💡",
+};
+// Старые названия сфер (до 28.09.2026) — для черновиков, сохранённых в браузере
+const LEGACY_CATEGORY = {
+  AI: "AI / ИИ", SaaS: "Технологии / IT / SaaS", FoodTech: "Ресторан / кафе / кофейня",
+  FinTech: "Финансы", EdTech: "Образование", "E-commerce": "Магазин / E-commerce",
 };
 
 const OFFER_STATUS = {
@@ -558,6 +565,7 @@ function setupIdeaForm() {
     form.reset();
     const draft = draftLoad(draftKey("idea-draft"));
     if (draft) {
+      if (LEGACY_CATEGORY[draft.category]) draft.category = LEGACY_CATEGORY[draft.category];
       for (const name of IDEA_FORM_FIELDS) if (typeof draft[name] === "string") form.elements[name].value = draft[name];
       toast("Восстановили незаконченную проверку идеи");
     }
@@ -790,7 +798,8 @@ function renderProject(s) {
       <p>${esc(s.partner_needed || "Не указано")}</p>
       ${missingTitles.length ? `<p class="muted">Проекту пока не хватает: ${esc(missingTitles.slice(0, 3).join(", "))}. Партнёр с опытом в этом ускорит проверку.</p>` : ""}
       ${published
-        ? `<button class="btn primary block" type="button" id="go-match">Подобрать партнёра →</button>`
+        ? `<button class="btn primary block" type="button" id="go-match">Подобрать партнёра →</button>
+           <div class="actions"><button class="btn danger small" type="button" id="delete-project">Удалить проект</button></div>`
         : `<p class="muted">Опубликуйте проект, чтобы кандидаты могли откликаться, а ИИ — подбирать людей.</p>
            <div class="actions">
              <button class="btn danger small" type="button" id="delete-project">Удалить черновик</button>
@@ -806,6 +815,21 @@ function renderProject(s) {
   );
   setupTasks(s);
 
+  $("delete-project").addEventListener("click", async (e) => {
+    const button = e.currentTarget; // после await currentTarget уже пустой
+    const text = published
+      ? "Проект пропадёт из поиска и подбора, ожидающие отклики будут отклонены. MATCH и контакты у тех, с кем вы уже договорились, сохранятся. Действие нельзя отменить."
+      : "Проект и его карта будут удалены. Это действие нельзя отменить.";
+    if (!(await confirmDialog(text, { title: published ? "Удалить проект?" : "Удалить черновик?", ok: "Удалить" }))) return;
+    try {
+      await busy(button, "Удаляем…", () => api("DELETE", `/api/startups/${s.id}`));
+      toast(published ? "Проект удалён" : "Черновик удалён");
+      show("projects");
+    } catch (error) {
+      toast(error.message, "error");
+    }
+  });
+
   if (published) {
     $("go-match").addEventListener("click", () => show("match"));
   } else {
@@ -817,17 +841,6 @@ function renderProject(s) {
         await busy(button, "Публикуем…", () => api("POST", `/api/startups/${s.id}/publish`));
         toast("Проект опубликован. Теперь можно подобрать партнёра.");
         loadProject(s.id);
-      } catch (error) {
-        toast(error.message, "error");
-      }
-    });
-    $("delete-project").addEventListener("click", async (e) => {
-      const button = e.currentTarget; // после await currentTarget уже пустой
-      if (!(await confirmDialog("Проект и его карта будут удалены. Это действие нельзя отменить.", { title: "Удалить черновик?", ok: "Удалить" }))) return;
-      try {
-        await busy(button, "Удаляем…", () => api("DELETE", `/api/startups/${s.id}`));
-        toast("Черновик удалён");
-        show("projects");
       } catch (error) {
         toast(error.message, "error");
       }

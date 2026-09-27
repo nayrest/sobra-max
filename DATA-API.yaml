@@ -167,7 +167,7 @@ checks:
     role: founder
     body:
       name: Кофейня у дома (тест)
-      category: FoodTech
+      category: "Ресторан / кафе / кофейня"
       market_type: B2C
       stage: Идея
       seeking: Команда / co-founder
@@ -206,7 +206,7 @@ checks:
     role: founder
     body:
       name: Без ответов
-      category: FoodTech
+      category: "Ресторан / кафе / кофейня"
       market_type: B2C
       stage: Идея
       seeking: Партнёрство

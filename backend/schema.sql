@@ -220,3 +220,21 @@ CREATE TABLE IF NOT EXISTS contact_clicks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_contact_clicks_offer ON contact_clicks (offer_id);
+
+-- Сферы переименованы понятными словами (отзыв пилота 27.09.2026). Идемпотентно: трогает только старые значения.
+UPDATE startups SET category = CASE category
+  WHEN 'AI' THEN 'AI / ИИ'
+  WHEN 'SaaS' THEN 'Технологии / IT / SaaS'
+  WHEN 'FoodTech' THEN 'Ресторан / кафе / кофейня'
+  WHEN 'FinTech' THEN 'Финансы'
+  WHEN 'EdTech' THEN 'Образование'
+  WHEN 'E-commerce' THEN 'Магазин / E-commerce'
+END WHERE category IN ('AI', 'SaaS', 'FoodTech', 'FinTech', 'EdTech', 'E-commerce');
+UPDATE search_profiles SET category = CASE category
+  WHEN 'AI' THEN 'AI / ИИ'
+  WHEN 'SaaS' THEN 'Технологии / IT / SaaS'
+  WHEN 'FoodTech' THEN 'Ресторан / кафе / кофейня'
+  WHEN 'FinTech' THEN 'Финансы'
+  WHEN 'EdTech' THEN 'Образование'
+  WHEN 'E-commerce' THEN 'Магазин / E-commerce'
+END WHERE category IN ('AI', 'SaaS', 'FoodTech', 'FinTech', 'EdTech', 'E-commerce');

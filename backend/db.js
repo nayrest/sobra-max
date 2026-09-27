@@ -172,13 +172,29 @@ async function publishStartup(startupId, founderId) {
   return getStartupById(startupId);
 }
 
-// Заменяет DELETE в cancel_creation (удаление незавершённого черновика)
-async function deleteDraft(startupId, founderId) {
-  await pool.query(
-    `DELETE FROM startups
-     WHERE id = $1 AND founder_id = $2 AND status = 'draft'`,
+// Удаление проекта основателем.
+// Черновик удаляется полностью: на него никто не откликался.
+// Опубликованный помечается status = 'deleted': он пропадает из поиска, подбора и приглашений,
+// ожидающие отклики отклоняются, а уже случившиеся MATCH и контакты у собеседников сохраняются.
+// Возвращает id людей, чьи отклики отклонены (им обновим счётчики).
+async function deleteStartup(startupId, founderId) {
+  const { rows } = await pool.query(
+    `SELECT status FROM startups WHERE id = $1 AND founder_id = $2`,
     [startupId, founderId]
   );
+  if (!rows[0]) return [];
+  if (rows[0].status === "draft") {
+    await pool.query(`DELETE FROM startups WHERE id = $1 AND founder_id = $2 AND status = 'draft'`, [startupId, founderId]);
+    return [];
+  }
+  await pool.query(`UPDATE startups SET status = 'deleted' WHERE id = $1 AND founder_id = $2`, [startupId, founderId]);
+  const rejected = await pool.query(
+    `UPDATE offers SET status = 'rejected', decided_at = NOW()
+     WHERE startup_id = $1 AND status = 'new'
+     RETURNING sender_id`,
+    [startupId]
+  );
+  return [...new Set(rejected.rows.map((r) => Number(r.sender_id)))];
 }
 
 async function getFounderStartups(founderId) {
@@ -186,7 +202,7 @@ async function getFounderStartups(founderId) {
     `SELECT startups.*,
        (SELECT COUNT(*)::int FROM action_tasks t WHERE t.startup_id = startups.id AND t.status = 'open') AS tasks_open,
        (SELECT COUNT(*)::int FROM action_tasks t WHERE t.startup_id = startups.id AND t.status = 'done') AS tasks_done
-     FROM startups WHERE founder_id = $1 ORDER BY id DESC`,
+     FROM startups WHERE founder_id = $1 AND status <> 'deleted' ORDER BY id DESC`,
     [founderId]
   );
 
@@ -368,6 +384,7 @@ async function getReceivedOffers(founderId) {
      JOIN startups ON startups.id = offers.startup_id
      LEFT JOIN search_profiles sp ON sp.user_id = offers.sender_id
      WHERE startups.founder_id = $1
+       AND (startups.status <> 'deleted' OR offers.status = 'accepted')
      ORDER BY offers.id DESC`,
     [founderId]
   );
@@ -854,7 +871,7 @@ module.exports = {
   getStartupById,
   getPublishedStartupById,
   publishStartup,
-  deleteDraft,
+  deleteStartup,
   getFounderStartups,
   findMatches,
   saveSearchProfile,

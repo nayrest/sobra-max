@@ -20,7 +20,20 @@ const actionPlan = require("./action-plan");
 
 const STAGES = ["Идея", "Прототип", "MVP", "Первые продажи", "Масштабирование"];
 const MARKET_TYPES = ["B2B", "B2C", "B2B2C"];
-const CATEGORIES = ["AI", "SaaS", "FoodTech", "FinTech", "EdTech", "E-commerce", "Другое"];
+// Сферы проекта — понятными словами, а не отраслевыми терминами (отзыв пилота 27.09.2026)
+const CATEGORIES = [
+  "Ресторан / кафе / кофейня", "Магазин / E-commerce", "Услуги", "Производство", "Образование", "Финансы", "Технологии / IT / SaaS", "AI / ИИ", "Маркетинг / медиа", "Логистика / доставка", "Другое",
+];
+// Старые названия принимаются и переводятся в новые: у кого-то в MAX может быть закэширована старая версия
+const LEGACY_CATEGORY = {
+  AI: "AI / ИИ",
+  SaaS: "Технологии / IT / SaaS",
+  FoodTech: "Ресторан / кафе / кофейня",
+  FinTech: "Финансы",
+  EdTech: "Образование",
+  "E-commerce": "Магазин / E-commerce",
+};
+const normalizeCategory = (value) => (typeof value === "string" && LEGACY_CATEGORY[value]) || value;
 
 const SEEKING = {
   team: "Команда / co-founder",
@@ -562,7 +575,7 @@ function createApi({ notify = {} } = {}) {
 
     const data = {
       name: requireText(body, "name", 100),
-      category: requireOneOf(body.category, CATEGORIES, "category"),
+      category: requireOneOf(normalizeCategory(body.category), CATEGORIES, "category"),
       market_type: requireOneOf(body.market_type, MARKET_TYPES, "market_type"),
       stage: requireOneOf(body.stage, STAGES, "stage"),
       seeking,
@@ -609,7 +622,7 @@ function createApi({ notify = {} } = {}) {
 
   async function getOwnStartup(req) {
     const startup = await db.getStartupById(parseId(req.params.id));
-    if (!startup || Number(startup.founder_id) !== req.user.userId) {
+    if (!startup || Number(startup.founder_id) !== req.user.userId || startup.status === "deleted") {
       throw new ApiError(404, "Проект не найден");
     }
     return startup;
@@ -695,11 +708,8 @@ function createApi({ notify = {} } = {}) {
 
   app.delete("/api/startups/:id", wrap(async (req, res) => {
     const startup = await getOwnStartup(req);
-    if (startup.status !== "draft") {
-      throw new ApiError(409, "Удалить можно только черновик");
-    }
-
-    await db.deleteDraft(startup.id, req.user.userId);
+    const affected = await db.deleteStartup(startup.id, req.user.userId);
+    for (const userId of affected) publishEvent(userId);
     res.status(204).end();
   }));
 
@@ -711,7 +721,7 @@ function createApi({ notify = {} } = {}) {
 
     const criteria = {
       goal,
-      category: requireOneOf(body.category, [...CATEGORIES, "Любая"], "category"),
+      category: requireOneOf(normalizeCategory(body.category), [...CATEGORIES, "Любая"], "category"),
       min_stage: requireOneOf(body.min_stage, STAGES, "min_stage"),
       max_investment: null,
     };
@@ -833,7 +843,7 @@ function createApi({ notify = {} } = {}) {
 
     await db.saveSearchProfile(req.user.userId, {
       goal,
-      category: requireOneOf(body.category || "Любая", [...CATEGORIES, "Любая"], "category"),
+      category: requireOneOf(normalizeCategory(body.category) || "Любая", [...CATEGORIES, "Любая"], "category"),
       min_stage: current?.min_stage || "Идея",
       max_investment: current?.max_investment || null,
       about,

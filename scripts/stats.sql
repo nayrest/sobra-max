@@ -23,7 +23,8 @@ UNION ALL SELECT '  подтвердили телефон через MAX', COUNT
 UNION ALL SELECT '  цель «команда» / «партнёрство»',
           (COUNT(*) FILTER (WHERE goal = 'team'))::text || ' / ' || (COUNT(*) FILTER (WHERE goal = 'partner'))::text FROM real_profiles
 UNION ALL SELECT 'Проектов создано (прошли Idea Check)', COUNT(*)::text FROM real_startups
-UNION ALL SELECT '  опубликовано', COUNT(*)::text FROM real_startups WHERE status = 'published'
+UNION ALL SELECT '  опубликовано (включая удалённые потом)', COUNT(*)::text FROM real_startups WHERE status IN ('published', 'deleted')
+UNION ALL SELECT '  удалено основателями после публикации', COUNT(*)::text FROM real_startups WHERE status = 'deleted'
 UNION ALL SELECT '  основателей (разных людей)', COUNT(DISTINCT founder_id)::text FROM real_startups
 UNION ALL SELECT '  средняя готовность, %', COALESCE(ROUND(AVG(readiness))::text, '—') FROM real_startups
 UNION ALL SELECT 'Update: внесено результатов проверок', COUNT(*)::text FROM action_tasks t JOIN real_startups s ON s.id = t.startup_id

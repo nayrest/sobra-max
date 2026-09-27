@@ -393,13 +393,15 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
     delete:
       tags: [Проекты]
-      summary: Удалить черновик
+      summary: Удалить проект
+      description: >-
+        Черновик удаляется полностью. Опубликованный проект исчезает из поиска, подбора и приглашений,
+        ожидающие отклики отклоняются; уже случившиеся MATCH и контакты у собеседников сохраняются.
       operationId: deleteStartup
       responses:
-        "204": { description: Черновик удалён }
+        "204": { description: Проект удалён }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "409": { $ref: "#/components/responses/Conflict" }
 
   /startups/{id}/publish:
     post:
@@ -583,7 +585,7 @@ paths:
               required: [goal, category, min_stage]
               properties:
                 goal: { $ref: "#/components/schemas/Goal" }
-                category: { type: string, enum: [Любая, AI, SaaS, FoodTech, FinTech, EdTech, E-commerce, Другое] }
+                category: { type: string, enum: [Любая, "Ресторан / кафе / кофейня", "Магазин / E-commerce", "Услуги", "Производство", "Образование", "Финансы", "Технологии / IT / SaaS", "AI / ИИ", "Маркетинг / медиа", "Логистика / доставка", "Другое"] }
                 min_stage: { $ref: "#/components/schemas/Stage" }
                 about: { type: string, maxLength: 1500, description: Необязательно — по умолчанию берётся из профиля }
       responses:
@@ -971,7 +973,7 @@ components:
         email: { type: string, format: email, maxLength: 200, example: ivan@example.com }
         phone: { type: string, example: "+7 (900) 123-45-67", description: Российский номер, любой формат }
         goal: { $ref: "#/components/schemas/ProfileGoal" }
-        category: { type: string, default: Любая, enum: [Любая, AI, SaaS, FoodTech, FinTech, EdTech, E-commerce, Другое] }
+        category: { type: string, default: Любая, enum: [Любая, "Ресторан / кафе / кофейня", "Магазин / E-commerce", "Услуги", "Производство", "Образование", "Финансы", "Технологии / IT / SaaS", "AI / ИИ", "Маркетинг / медиа", "Логистика / доставка", "Другое"] }
         about: { type: string, maxLength: 1500, description: Обязательно для team и partner, example: 4 года управлял рестораном, отвечал за персонал и поставщиков }
         visible: { type: boolean, default: false, description: Показывать профиль основателям для приглашений }
         consent:
@@ -1026,7 +1028,7 @@ components:
       required: [name, category, market_type, stage, seeking, customer, problem, solution, partner_needed]
       properties:
         name: { type: string, maxLength: 100, example: Кофейня у дома }
-        category: { type: string, enum: [AI, SaaS, FoodTech, FinTech, EdTech, E-commerce, Другое] }
+        category: { type: string, enum: ["Ресторан / кафе / кофейня", "Магазин / E-commerce", "Услуги", "Производство", "Образование", "Финансы", "Технологии / IT / SaaS", "AI / ИИ", "Маркетинг / медиа", "Логистика / доставка", "Другое"], description: Старые значения (AI, SaaS, FoodTech, FinTech, EdTech, E-commerce) тоже принимаются и переводятся в новые }
         market_type: { type: string, enum: [B2B, B2C, B2B2C] }
         stage: { $ref: "#/components/schemas/Stage" }
         seeking: { type: string, enum: [Команда / co-founder, Партнёрство] }
