@@ -1490,6 +1490,8 @@ function setupProfileForm() {
     else window.scrollTo({ top: 0, behavior: "smooth" });
   };
   $("userbox").addEventListener("click", openProfile);
+  // Логотип — на главную («Проекты»), пока идёт вход — ничего не делает
+  $("brand").addEventListener("click", () => { if (state.user) show("projects"); });
   $("profile-cta").addEventListener("click", openProfile);
   form.addEventListener("click", openPrivacy);
   $("privacy-close").addEventListener("click", closePrivacy);

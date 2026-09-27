@@ -52,7 +52,11 @@ button { cursor: pointer; }
   border-bottom: 1px solid #e7ebf6;
 }
 
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 20px; }
+.brand {
+  display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 20px;
+  background: none; border: 0; padding: 0; color: inherit;
+}
+.brand:focus-visible { outline: 2px solid var(--blue); outline-offset: 4px; border-radius: 8px; }
 .brand b { color: #5d46ff; }
 .brand-logo {
   width: 32px; height: 32px; border-radius: 10px;
@@ -68,7 +72,6 @@ button { cursor: pointer; }
   display: flex; align-items: center; gap: 8px; color: var(--ink-soft); min-width: 0;
   background: none; border: 0; padding: 4px 10px 4px 4px; border-radius: 999px;
 }
-.userbox:not(:disabled):hover { background: #eef3ff; }
 .userbox:disabled { cursor: default; }
 .userbox:focus-visible, .profile-cta:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .userbox span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
