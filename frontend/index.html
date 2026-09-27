@@ -210,14 +210,14 @@
             <textarea class="input textarea" name="about" maxlength="1500" placeholder="Опыт, навыки, сколько времени готовы уделять и какую роль хотите. Например: 4 года управлял рестораном, отвечал за персонал и поставщиков, готов уделять 30 часов в неделю"></textarea></label>
           <label class="check wide">
             <input type="checkbox" name="consent">
-            <span>Согласен(на), что мои ФИО, телефон, e-mail и ссылку на профиль в MAX увидит только тот, с кем у меня случится MATCH — когда основатель примет отклик. До этого их не видит никто. <b class="required">*</b></span>
+            <span>Согласен(на), что мои ФИО, телефон, e-mail и ссылку на профиль в MAX увидит только тот, с кем у меня случится MATCH — когда основатель примет отклик. До этого их не видит никто. Подробнее — в <a href="privacy.html" class="privacy-link">политике обработки персональных данных</a>. <b class="required">*</b></span>
           </label>
           <label class="check wide" id="visible-field">
             <input type="checkbox" name="visible">
             <span>Показывать мой профиль основателям, чтобы они могли пригласить меня в проект</span>
           </label>
           <p class="data-note wide">
-            ℹ️ SOBRA учитывает действия в приложении — создание проектов, отклики, оценки ИИ, нажатия на контакты после MATCH, — чтобы понимать, что работает, и улучшать сервис. В отчётах только общие числа, без имён и контактов. Никому не передаём.
+            ℹ️ SOBRA учитывает действия в приложении — создание проектов, отклики, оценки ИИ, нажатия на контакты после MATCH, — чтобы понимать, что работает, и улучшать сервис. В отчётах только общие числа, без имён и контактов. Никому не передаём. <a href="privacy.html" class="privacy-link">Политика обработки персональных данных</a>
           </p>
         </div>
         <p class="form-error" id="profile-error" hidden></p>
@@ -328,6 +328,14 @@
         <button type="button" class="btn secondary" id="confirm-cancel">Отмена</button>
         <button type="button" class="btn danger" id="confirm-ok">Да</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Политика обработки персональных данных: открывается поверх, не сбрасывая заполненную форму -->
+  <div class="sheet-backdrop privacy-backdrop" id="privacy-sheet" hidden>
+    <div class="sheet privacy-sheet" role="dialog" aria-modal="true" aria-label="Политика обработки персональных данных">
+      <iframe id="privacy-frame" title="Политика обработки персональных данных"></iframe>
+      <button type="button" class="btn primary block" id="privacy-close">Понятно</button>
     </div>
   </div>
 

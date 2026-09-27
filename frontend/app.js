@@ -1438,6 +1438,22 @@ async function onProfileEvent() {
   }
 }
 
+// Политика обработки персональных данных — поверх экрана, чтобы не терять заполненный профиль.
+// Сама страница лежит отдельно (privacy.html): у неё есть и прямой адрес для README и жюри.
+function openPrivacy(event) {
+  const link = event.target.closest(".privacy-link");
+  if (!link) return;
+  event.preventDefault(); // ссылка внутри <label> не должна переключать галочку
+  const frame = $("privacy-frame");
+  if (!frame.getAttribute("src")) frame.setAttribute("src", "privacy.html");
+  $("privacy-sheet").hidden = false;
+  $("privacy-close").focus();
+}
+
+function closePrivacy() {
+  $("privacy-sheet").hidden = true;
+}
+
 // Для цели «Развиваю свою идею» «О себе» необязательно, а показ профиля основателям не нужен
 function syncGoalFields() {
   const own = $("profile-form").elements.goal.value === "own";
@@ -1461,6 +1477,10 @@ function setupProfileForm() {
   const form = $("profile-form");
   setupPhoneMask(form.elements.phone);
   form.elements.goal.addEventListener("change", syncGoalFields);
+  form.addEventListener("click", openPrivacy);
+  $("privacy-close").addEventListener("click", closePrivacy);
+  $("privacy-sheet").addEventListener("click", (e) => { if (e.target.id === "privacy-sheet") closePrivacy(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("privacy-sheet").hidden) closePrivacy(); });
   $("max-link-toggle").addEventListener("click", () => {
     $("max-link-manual").hidden = false;
     $("max-link-toggle").hidden = true;
