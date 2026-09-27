@@ -64,8 +64,15 @@ button { cursor: pointer; }
   color: #fff; background: linear-gradient(135deg, #2369ff, #7b42f6);
 }
 
-.userbox { display: flex; align-items: center; gap: 8px; color: var(--ink-soft); min-width: 0; }
+.userbox {
+  display: flex; align-items: center; gap: 8px; color: var(--ink-soft); min-width: 0;
+  background: none; border: 0; padding: 4px 10px 4px 4px; border-radius: 999px;
+}
+.userbox:not(:disabled):hover { background: #eef3ff; }
+.userbox:disabled { cursor: default; }
+.userbox:focus-visible, .profile-cta:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .userbox span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
+.profile-cta { white-space: nowrap; flex-shrink: 0; }
 .avatar {
   flex: 0 0 auto; width: 34px; height: 34px; border-radius: 50%;
   display: grid; place-items: center; overflow: hidden;

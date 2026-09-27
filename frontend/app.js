@@ -1181,7 +1181,14 @@ function displayNameFromProfile(p, fallback) {
   return fallback || "";
 }
 
+// Шапка: заполненный профиль — фото и «Фамилия И.», по нажатию открывается профиль.
+// Не заполнен — вместо них кнопка «Заполнить профиль». Пока профиль грузится (p === null) — имя из MAX.
 function updateUserbox(p) {
+  const loaded = p !== null && p !== undefined;
+  const complete = loaded && isProfileComplete(p);
+  $("userbox").hidden = loaded && !complete;
+  $("userbox").disabled = !state.user;
+  $("profile-cta").hidden = !loaded || complete;
   const name = displayNameFromProfile(p, state.user?.name || `ID ${state.user?.user_id || ""}`);
   $("user-name").textContent = name || "Вход…";
   const initials = initialsOf([p?.first_name, p?.last_name].filter(Boolean).join(" ") || name);
@@ -1477,6 +1484,13 @@ function setupProfileForm() {
   const form = $("profile-form");
   setupPhoneMask(form.elements.phone);
   form.elements.goal.addEventListener("change", syncGoalFields);
+  // Шапка ведёт в профиль. Если он уже открыт — не перезагружаем, чтобы не стереть введённое.
+  const openProfile = () => {
+    if ($("view-profile").hidden) show("profile");
+    else window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  $("userbox").addEventListener("click", openProfile);
+  $("profile-cta").addEventListener("click", openProfile);
   form.addEventListener("click", openPrivacy);
   $("privacy-close").addEventListener("click", closePrivacy);
   $("privacy-sheet").addEventListener("click", (e) => { if (e.target.id === "privacy-sheet") closePrivacy(); });
