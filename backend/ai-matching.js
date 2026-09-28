@@ -121,20 +121,21 @@ function buildUserMessage(about, criteria, startup) {
 // Неверный ключ (401) или нет прав (403) — повтор не поможет.
 class RetryableError extends Error {}
 
-async function callWithRetry(userText, systemPrompt = SYSTEM_PROMPT) {
+// options: { maxTokens, temperature } — для длинных ответов (например, автозаполнение Idea Check)
+async function callWithRetry(userText, systemPrompt = SYSTEM_PROMPT, options = {}) {
   try {
-    return await callYandexGpt(userText, systemPrompt);
+    return await callYandexGpt(userText, systemPrompt, options);
   } catch (error) {
     if (!(error instanceof RetryableError)) throw error;
     await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
-    return callYandexGpt(userText, systemPrompt);
+    return callYandexGpt(userText, systemPrompt, options);
   }
 }
 
-async function callYandexGpt(userText, systemPrompt) {
+async function callYandexGpt(userText, systemPrompt, options = {}) {
   let response;
   try {
-    response = await sendRequest(userText, systemPrompt);
+    response = await sendRequest(userText, systemPrompt, options);
   } catch (error) {
     // fetch падает без ответа сервера: обрыв соединения, DNS, таймаут
     const reason = error.cause?.code || error.name || error.message;
@@ -154,7 +155,7 @@ async function callYandexGpt(userText, systemPrompt) {
   return text;
 }
 
-function sendRequest(userText, systemPrompt) {
+function sendRequest(userText, systemPrompt, { maxTokens = 600, temperature = 0.1 } = {}) {
   return fetch(COMPLETION_URL, {
     method: "POST",
     headers: {
@@ -164,7 +165,7 @@ function sendRequest(userText, systemPrompt) {
     },
     body: JSON.stringify({
       modelUri: modelUri(),
-      completionOptions: { stream: false, temperature: 0.1, maxTokens: "600" },
+      completionOptions: { stream: false, temperature, maxTokens: String(maxTokens) },
       jsonObject: true,
       messages: [
         { role: "system", text: systemPrompt },

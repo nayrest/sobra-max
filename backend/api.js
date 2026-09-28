@@ -13,6 +13,7 @@ const db = require("./db");
 const aiMatching = require("./ai-matching");
 const ideaCheck = require("./idea-check");
 const actionPlan = require("./action-plan");
+const { autofillIdea } = require("./idea-autofill");
 
 // ======================================================
 // СПРАВОЧНИКИ (совпадают со значениями, которые пишет бот)
@@ -587,6 +588,42 @@ function createApi({ notify = {} } = {}) {
     await enforceDailyLimit(req, "startups");
     const startup = await db.saveStartupDraft(req.user.userId, data);
     res.status(201).json(await withTasks(await withIdeaMap(startup)));
+  }));
+
+  // Быстрый старт: ИИ раскладывает свободное описание идеи по полям формы (черновик, ничего не сохраняет).
+  // Лимит в сутки — в памяти процесса: это дешёвая защита от перебора, а не учёт.
+  const AUTOFILL_DAILY_MAX = 30;
+  const autofillUsage = new Map(); // userId -> { day, count }
+
+  app.post("/api/startups/autofill", wrap(async (req, res) => {
+    const description = requireText(req.body || {}, "description", 1500);
+    if (description.replace(/\s+/g, " ").trim().length < 15) {
+      throw new ApiError(400, "Опишите идею чуть подробнее — хотя бы одно-два предложения");
+    }
+
+    const day = new Date().toISOString().slice(0, 10);
+    const usage = autofillUsage.get(req.user.userId);
+    const count = usage && usage.day === day ? usage.count : 0;
+    if (!db.isTestUser(req.user.userId) && count >= AUTOFILL_DAILY_MAX) {
+      throw new ApiError(429, "Сегодня автозаполнение использовано уже 30 раз. Заполните форму вручную или попробуйте завтра.");
+    }
+    autofillUsage.set(req.user.userId, { day, count: count + 1 });
+
+    try {
+      const fields = await autofillIdea(description, {
+        categories: CATEGORIES,
+        stages: STAGES,
+        marketTypes: MARKET_TYPES,
+        seekingValues: Object.values(SEEKING),
+      });
+      res.json({ fields });
+    } catch (error) {
+      if (error.message === "AI_DISABLED") {
+        throw new ApiError(503, "ИИ сейчас недоступен. Заполните форму вручную — карта проекта всё равно построится.");
+      }
+      console.error("❌ Ошибка автозаполнения:", error.message);
+      throw new ApiError(502, "ИИ не смог разобрать описание. Попробуйте ещё раз или заполните форму вручную.");
+    }
   }));
 
   // Обновить отдельные блоки Idea Check без повторного прохождения всей формы

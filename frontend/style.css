@@ -232,6 +232,11 @@ h2.section { margin: 22px 0 10px; }
 .input:focus { border-color: #6f5cff; box-shadow: 0 0 0 3px rgba(87, 75, 255, 0.12); }
 .input:disabled { background: #f5f7fc; color: var(--muted); }
 .textarea { min-height: 96px; resize: vertical; }
+.autofill-card { border: 1px solid #d9d2ff; background: linear-gradient(180deg, #fbfaff, #fff); display: grid; gap: 10px; }
+.autofill-card .step-head { margin-bottom: 0; }
+.step-num.ai { background: var(--grad); color: #fff; }
+.muted.small { font-size: 12px; margin: 0; }
+.field.autofilled .input { background: #f6f3ff; transition: background 1.2s ease; }
 
 .check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; color: var(--ink-soft); }
 .check input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--violet); }

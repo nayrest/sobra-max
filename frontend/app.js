@@ -563,6 +563,8 @@ function setupIdeaForm() {
   $("open-idea").addEventListener("click", () => {
     formError("idea-error", null);
     form.reset();
+    $("autofill-text").value = "";
+    formError("autofill-error", null);
     const draft = draftLoad(draftKey("idea-draft"));
     if (draft) {
       if (LEGACY_CATEGORY[draft.category]) draft.category = LEGACY_CATEGORY[draft.category];
@@ -571,6 +573,38 @@ function setupIdeaForm() {
     }
     $("idea-draft-note").hidden = !draft;
     show("idea");
+  });
+
+  // Быстрый старт: ИИ раскладывает описание по полям. Поля, которые ИИ заполнил, ненадолго подсвечиваются.
+  $("autofill-btn").addEventListener("click", async (e) => {
+    const button = e.currentTarget;
+    formError("autofill-error", null);
+    const description = $("autofill-text").value.trim();
+    if (description.length < 15) {
+      $("autofill-text").focus();
+      formError("autofill-error", new Error("Опишите идею хотя бы в одном-двух предложениях: что делаете, для кого и кого ищете."));
+      return;
+    }
+    const hasAnswers = IDEA_FORM_FIELDS.some((name) => form.elements[name].value.trim());
+    if (hasAnswers && !(await confirmDialog("Ответы в форме заменятся предложениями ИИ. Потом их можно поправить.", { title: "Заполнить форму заново?", ok: "Заполнить", danger: false }))) return;
+    try {
+      const { fields } = await busy(button, "ИИ заполняет форму…", () => api("POST", "/api/startups/autofill", { description }));
+      for (const name of IDEA_FORM_FIELDS) {
+        const el = form.elements[name];
+        if (typeof fields[name] !== "string") continue;
+        el.value = fields[name];
+        const wrapper = el.closest(".field");
+        if (wrapper && fields[name]) {
+          wrapper.classList.add("autofilled");
+          setTimeout(() => wrapper.classList.remove("autofilled"), 2500);
+        }
+      }
+      saveDraft();
+      toast("Черновик готов. Проверьте ответы и поправьте, где ИИ ошибся.");
+      form.querySelector(".card").scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (error) {
+      formError("autofill-error", error);
+    }
   });
 
   $("idea-draft-clear").addEventListener("click", async () => {

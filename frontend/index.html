@@ -57,6 +57,16 @@
         <button class="text-btn" type="button" id="idea-draft-clear">Очистить форму</button>
       </p>
 
+      <div class="card autofill-card">
+        <div class="step-head"><span class="step-num ai">✨</span><div><h2>Быстрый старт</h2>
+          <p class="muted">Опишите идею своими словами — ИИ заполнит форму черновиком, а вы проверите и поправите.</p></div></div>
+        <textarea class="input textarea" id="autofill-text" maxlength="1500" rows="3"
+          placeholder="Например: хочу открыть кофейню у метро в спальном районе, утром большой поток людей, рядом только одна точка. Сам умею варить кофе, ищу партнёра на операционку — персонал и поставщики."></textarea>
+        <p class="form-error" id="autofill-error" hidden></p>
+        <div class="actions"><button class="btn primary" type="button" id="autofill-btn">✨ Заполнить с ИИ</button></div>
+        <p class="muted small">Чего нет в описании — спроса, конкурентов, экономики, — ИИ не придумывает: эти поля останутся пустыми, их можно дописать сами.</p>
+      </div>
+
       <form id="idea-form" novalidate>
         <div class="card">
           <div class="step-head"><span class="step-num">1</span><div><h2>О проекте</h2><p class="muted">Основная информация</p></div></div>

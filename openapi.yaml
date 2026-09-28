@@ -317,6 +317,49 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
 
+  /startups/autofill:
+    post:
+      tags: [Проекты]
+      summary: Быстрый старт Idea Check — ИИ заполняет форму по описанию идеи
+      description: |
+        YandexGPT раскладывает свободное описание по полям формы Idea Check. Ничего не сохраняет:
+        это черновик, который человек правит и отправляет через `POST /startups`.
+        Факты не придумываются: чего нет в описании (спрос, конкуренты, экономика), возвращается пустой строкой.
+        Лимит — 30 запросов в сутки на пользователя.
+      operationId: autofillStartup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [description]
+              properties:
+                description: { type: string, minLength: 15, maxLength: 1500, example: Хочу открыть кофейню у метро в спальном районе, ищу партнёра на операционку }
+      responses:
+        "200":
+          description: Предложенные значения полей формы
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [fields]
+                properties:
+                  fields: { $ref: "#/components/schemas/AutofillFields" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "502":
+          description: ИИ не смог разобрать описание — можно повторить или заполнить вручную
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: ИИ выключен (не заданы YANDEX_API_KEY / YANDEX_FOLDER_ID)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /startups/my:
     get:
       tags: [Проекты]
@@ -1040,6 +1083,24 @@ components:
         traction: { type: string, maxLength: 1000, nullable: true, description: Как проверяли спрос }
         business_model: { type: string, maxLength: 1000, nullable: true }
         economics: { type: string, maxLength: 1000, nullable: true }
+
+    AutofillFields:
+      type: object
+      required: [name, category, market_type, stage, seeking, customer, problem, solution, competitors, traction, business_model, economics, partner_needed]
+      properties:
+        name: { type: string, maxLength: 100 }
+        category: { type: string, enum: ["Ресторан / кафе / кофейня", "Магазин / E-commerce", "Услуги", "Производство", "Образование", "Финансы", "Технологии / IT / SaaS", "AI / ИИ", "Маркетинг / медиа", "Логистика / доставка", "Другое"] }
+        market_type: { type: string, enum: ["", B2B, B2C, B2B2C], description: Пустая строка — ИИ не смог определить, человек выберет сам }
+        stage: { $ref: "#/components/schemas/Stage" }
+        seeking: { type: string, enum: [Команда / co-founder, Партнёрство] }
+        customer: { type: string, maxLength: 1000 }
+        problem: { type: string, maxLength: 1000 }
+        solution: { type: string, maxLength: 1000 }
+        competitors: { type: string, maxLength: 1000, description: Пусто, если в описании не было }
+        traction: { type: string, maxLength: 1000, description: Пусто, если в описании не было }
+        business_model: { type: string, maxLength: 1000, description: Пусто, если в описании не было }
+        economics: { type: string, maxLength: 1000, description: Пусто, если в описании не было }
+        partner_needed: { type: string, maxLength: 1000 }
 
     MapBlock:
       type: object
