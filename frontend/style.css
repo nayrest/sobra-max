@@ -302,6 +302,13 @@ h2.section { margin: 22px 0 10px; }
   animation: spin 0.8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(112, 65, 245, 0.55); }
+  70% { box-shadow: 0 0 0 14px rgba(112, 65, 245, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(112, 65, 245, 0); }
+}
+.btn.pulse { animation: pulse-ring 1.2s ease-out 3; }
+@media (prefers-reduced-motion: reduce) { .btn.pulse { animation: none; outline: 3px solid #7041f5; outline-offset: 3px; } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
 
 /* ---------- Панель отклика и уведомление ---------- */

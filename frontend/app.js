@@ -873,8 +873,16 @@ function renderProject(s) {
       if (!(await requireProfile("Чтобы опубликовать проект, заполните профиль.", again))) return;
       try {
         await busy(button, "Публикуем…", () => api("POST", `/api/startups/${s.id}/publish`));
-        toast("Проект опубликован. Теперь можно подобрать партнёра.");
-        loadProject(s.id);
+        toast("Проект опубликован. Теперь подберите партнёра ↓");
+        // После перерисовки карта прыгает наверх — возвращаем человека к следующему шагу
+        // и подсвечиваем кнопку (отзыв пилота: кнопку «Подобрать партнёра» не находили)
+        await loadProject(s.id);
+        const next = $("go-match");
+        if (next) {
+          next.scrollIntoView({ behavior: "smooth", block: "center" });
+          next.classList.add("pulse");
+          setTimeout(() => next.classList.remove("pulse"), 4000);
+        }
       } catch (error) {
         toast(error.message, "error");
       }
