@@ -335,7 +335,7 @@ paths:
               type: object
               required: [description]
               properties:
-                description: { type: string, minLength: 15, maxLength: 1500, example: Хочу открыть кофейню у метро в спальном районе, ищу партнёра на операционку }
+                description: { type: string, minLength: 15, maxLength: 3000, example: Хочу открыть кофейню у метро в спальном районе, ищу партнёра на операционку }
       responses:
         "200":
           description: Предложенные значения полей формы

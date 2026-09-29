@@ -596,7 +596,7 @@ function createApi({ notify = {} } = {}) {
   const autofillUsage = new Map(); // userId -> { day, count }
 
   app.post("/api/startups/autofill", wrap(async (req, res) => {
-    const description = requireText(req.body || {}, "description", 1500);
+    const description = requireText(req.body || {}, "description", 3000);
     if (description.replace(/\s+/g, " ").trim().length < 15) {
       throw new ApiError(400, "Опишите идею чуть подробнее — хотя бы одно-два предложения");
     }
