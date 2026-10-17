@@ -1011,7 +1011,7 @@ function soloMatchCard(s, missingTitles) {
     <p class="eyebrow">Шаг 5 · AI Match · по желанию</p>
     <h3>Партнёр сейчас не нужен</h3>
     <p class="muted">Карта и план уже ваши. Продолжайте проверять идею — SOBRA будет пересчитывать карту по вашим результатам.</p>
-    ${missingTitles.length ? `<p class="muted">Если не хватает рук или опыта (сейчас не проработано: ${esc(missingTitles.slice(0, 3).join(", "))}) — включите подбор, и ИИ найдёт людей с нужными навыками.</p>` : ""}
+    ${missingTitles.length ? `<p class="muted">Если не хватает рук или опыта (пока не подтверждено: ${esc(missingTitles.slice(0, 3).join(", "))}) — включите подбор, и ИИ найдёт людей с нужными навыками.</p>` : ""}
     <form id="solo-partner-form" class="solo-partner" hidden novalidate>
       <label class="field"><span>Кого ищете <b class="required">*</b></span>
         <select class="input" name="seeking">
