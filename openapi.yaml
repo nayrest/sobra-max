@@ -1191,6 +1191,19 @@ components:
 
     # ---------- проекты ----------
 
+    ProjectLinks:
+      type: array
+      maxItems: 4
+      description: >-
+        Ссылки на готовые материалы: прототип, презентация, сайт, финмодель. Только https,
+        без логина и пароля в адресе. Видны кандидатам в карточке проекта.
+      items:
+        type: object
+        required: [kind, url]
+        properties:
+          kind: { type: string, enum: [figma, deck, landing, finmodel, other] }
+          url: { type: string, maxLength: 500, pattern: "^https://", example: "https://www.figma.com/file/abc" }
+
     IdeaFieldsPatch:
       type: object
       minProperties: 1
@@ -1201,6 +1214,7 @@ components:
         solution: { type: string, maxLength: 3000 }
         partner_needed: { type: string, maxLength: 3000 }
         seeking: { type: string, enum: [Команда / co-founder, Партнёрство], description: Включить подбор партнёра для проекта «только проверить идею». Карта при этом не пересчитывается }
+        links: { $ref: "#/components/schemas/ProjectLinks" }
         competitors: { type: string, maxLength: 3000, nullable: true }
         traction: { type: string, maxLength: 3000, nullable: true }
         business_model: { type: string, maxLength: 3000, nullable: true }
@@ -1222,6 +1236,7 @@ components:
         problem: { type: string, maxLength: 1000 }
         solution: { type: string, maxLength: 1000 }
         partner_needed: { type: string, maxLength: 1000, description: Какой партнёр нужен }
+        links: { $ref: "#/components/schemas/ProjectLinks" }
         competitors: { type: string, maxLength: 1000, nullable: true }
         traction: { type: string, maxLength: 1000, nullable: true, description: Как проверяли спрос }
         business_model: { type: string, maxLength: 1000, nullable: true }
@@ -1282,6 +1297,7 @@ components:
         market_type: { type: string }
         stage: { $ref: "#/components/schemas/Stage" }
         seeking: { type: string, nullable: true, description: "null — проект «только проверить идею», партнёр не нужен" }
+        links: { $ref: "#/components/schemas/ProjectLinks" }
         status: { type: string, enum: [draft, published] }
         customer: { type: string, nullable: true }
         problem: { type: string, nullable: true }

@@ -162,4 +162,26 @@ check("после создания проекта has_projects = true", me.get("
 s, err = call("POST", "/api/startups", SOLO, {"name": "Пустой", "category": "Услуги", "market_type": "B2C", "stage": "Идея"})
 check("без ответов о сути — по-прежнему 400", s == 400, (s, err))
 
+# ---------- 6. Ссылки на материалы проекта (отзыв тестировщика) ----------
+s, lk = call("PATCH", f"/api/startups/{sid_solo}", SOLO, {"links": [
+    {"kind": "figma", "url": "https://www.figma.com/file/abc"},
+    {"kind": "deck", "url": "https://disk.yandex.ru/i/xyz"}]})
+check("ссылки сохранены, карта не пересчитывалась", s == 200 and len(lk.get("links", [])) == 2 and lk.get("idea_map"), (s, lk))
+for bad_url in ["http://example.com", "javascript:alert(1)", "https://user:pass@evil.com", "https://localhost/x", "не ссылка"]:
+    s, err = call("PATCH", f"/api/startups/{sid_solo}", SOLO, {"links": [{"kind": "other", "url": bad_url}]})
+    check(f"плохая ссылка отклонена: {bad_url}", s == 400, (s, err))
+s, err = call("PATCH", f"/api/startups/{sid_solo}", SOLO, {"links": [{"kind": "virus", "url": "https://a.ru"}]})
+check("неизвестный вид ссылки → 400", s == 400, (s, err))
+s, err = call("PATCH", f"/api/startups/{sid_solo}", SOLO, {"links": [{"kind": "other", "url": f"https://a{i}.ru"} for i in range(5)]})
+check("больше 4 ссылок → 400", s == 400, (s, err))
+s, got = call("GET", f"/api/startups/{sid_solo}", SOLO)
+check("после отказов ссылки не испорчены", len(got.get("links", [])) == 2, got)
+s, lk = call("PATCH", f"/api/startups/{sid_solo}", SOLO, {"links": []})
+check("ссылки можно удалить", s == 200 and lk.get("links") == [], (s, lk))
+s, made = call("POST", "/api/startups", SOLO, {
+    "name": "Проект со ссылкой", "category": "Услуги", "market_type": "B2C", "stage": "Идея",
+    "customer": "Соседи", "problem": "Нет мастера", "solution": "Мастер по вызову",
+    "links": [{"kind": "landing", "url": "https://example.com"}]})
+check("ссылки можно передать сразу при создании", s == 201 and made.get("links") == [{"kind": "landing", "url": "https://example.com/"}], (s, made))
+
 print(f"\nИтого: {ok_count} OK, {fail_count} FAIL")

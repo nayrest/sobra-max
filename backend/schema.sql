@@ -264,3 +264,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS bot_unreachable_at TIMESTAMPTZ;
 -- NULL — ещё не выбирал. Проекту без поиска партнёра seeking = NULL.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS intent TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS intent_at TIMESTAMPTZ;
+
+-- Ссылки на готовые материалы проекта (отзыв тестировщика: «партнёры хотят видеть, что уже сделано руками»):
+-- [{"kind": "figma" | "deck" | "landing" | "finmodel" | "other", "url": "https://..."}], не больше 4
+ALTER TABLE startups ADD COLUMN IF NOT EXISTS links JSONB NOT NULL DEFAULT '[]'::jsonb;

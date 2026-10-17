@@ -30,6 +30,7 @@ UNION ALL SELECT '  опубликовано (включая удалённые 
 UNION ALL SELECT '  удалено основателями после публикации', COUNT(*)::text FROM real_startups WHERE status = 'deleted'
 UNION ALL SELECT '  основателей (разных людей)', COUNT(DISTINCT founder_id)::text FROM real_startups
 UNION ALL SELECT '  только проверка идеи (без поиска партнёра)', COUNT(*)::text FROM real_startups WHERE seeking IS NULL
+UNION ALL SELECT '  с материалами (ссылки на прототип, презентацию и т. п.)', COUNT(*)::text FROM real_startups WHERE jsonb_array_length(links) > 0
 UNION ALL SELECT '  средняя готовность, %', COALESCE(ROUND(AVG(readiness))::text, '—') FROM real_startups
 UNION ALL SELECT 'Update: внесено результатов проверок', COUNT(*)::text FROM action_tasks t JOIN real_startups s ON s.id = t.startup_id
           WHERE t.status = 'done' AND t.result IS NOT NULL

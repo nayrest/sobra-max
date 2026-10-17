@@ -103,19 +103,29 @@ async function saveStartupDraft(founderId, data) {
     `INSERT INTO startups (
        founder_id, name, category, market_type, stage, seeking, investment_amount,
        customer, problem, solution, competitors, traction, business_model, economics, partner_needed,
-       status
+       links, status
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'draft')
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'draft')
      RETURNING *`,
     [
       founderId, data.name, data.category, data.market_type, data.stage, data.seeking,
       data.investment_amount || null,
       data.customer || null, data.problem || null, data.solution || null, data.competitors || null,
       data.traction || null, data.business_model || null, data.economics || null, data.partner_needed || null,
+      JSON.stringify(data.links || []),
     ]
   );
 
   return rows[0];
+}
+
+// Ссылки на материалы проекта (Figma, презентация, лендинг, финмодель) — список целиком
+async function updateLinks(startupId, founderId, links) {
+  await pool.query(
+    `UPDATE startups SET links = $3 WHERE id = $1 AND founder_id = $2`,
+    [startupId, founderId, JSON.stringify(links)]
+  );
+  return getStartupById(startupId);
 }
 
 // Обновляет один или несколько блоков Idea Check у своего проекта
@@ -952,6 +962,7 @@ async function demoRespondToInvites(typeByGoal) {
 
 module.exports = {
   pool,
+  updateLinks,
   getMe,
   saveIntent,
   getMyOfferStatuses,

@@ -87,6 +87,30 @@ function requireText(body, field, maxLength = 1000) {
   return value.trim();
 }
 
+// Ссылки на материалы проекта. Только https: ссылку откроет другой человек,
+// поэтому никаких javascript:, data:, http и логинов в адресе.
+const LINK_KINDS = ["figma", "deck", "landing", "finmodel", "other"];
+const LINKS_MAX = 4;
+
+function parseLinks(value) {
+  if (!Array.isArray(value)) throw new ApiError(400, "Поле \"links\" должно быть списком");
+  if (value.length > LINKS_MAX) throw new ApiError(400, `Не больше ${LINKS_MAX} ссылок на проект`);
+  return value.map((link, i) => {
+    const kind = requireOneOf(link?.kind, LINK_KINDS, `links[${i}].kind`);
+    const raw = typeof link?.url === "string" ? link.url.trim() : "";
+    let url = null;
+    try {
+      url = raw && raw.length <= 500 ? new URL(raw) : null;
+    } catch {
+      url = null;
+    }
+    if (!url || url.protocol !== "https:" || !url.hostname.includes(".") || url.username || url.password) {
+      throw new ApiError(400, "Нужна ссылка вида https://… (Figma, Google Диск, Яндекс Диск, сайт)");
+    }
+    return { kind, url: url.toString() };
+  });
+}
+
 function requireOneOf(value, allowed, field) {
   if (!allowed.includes(value)) {
     throw new ApiError(400, `Поле "${field}" должно быть одним из: ${allowed.join(", ")}`);
@@ -603,6 +627,7 @@ function createApi({ notify = {} } = {}) {
       data[field] = solo && field === "partner_needed" ? optionalText(body, field) : requireText(body, field);
     }
     for (const field of OPTIONAL_IDEA) data[field] = optionalText(body, field);
+    data.links = body.links === undefined ? [] : parseLinks(body.links);
 
     await enforceDailyLimit(req, "startups");
     const startup = await db.saveStartupDraft(req.user.userId, data);
@@ -650,6 +675,11 @@ function createApi({ notify = {} } = {}) {
     const startup = await getOwnStartup(req);
     const body = req.body || {};
     const fields = {};
+
+    // Ссылки на материалы — не часть карты: сохраняем отдельно, без пересчёта
+    let withLinks = null;
+    if ("links" in body) withLinks = await db.updateLinks(startup.id, req.user.userId, parseLinks(body.links));
+    if (withLinks && Object.keys(body).every((k) => k === "links")) return res.json(await withTasks(withLinks));
 
     // 3000 символов: в блок дописываются результаты проверок (шаг Update)
     for (const field of REQUIRED_IDEA) {

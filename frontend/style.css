@@ -665,3 +665,17 @@ img { -webkit-user-drag: none; }                          /* картинки н
   .brand { font-size: 17px; gap: 6px; }
   .profile-cta { padding: 8px 10px; font-size: 12px; }
 }
+
+/* ---------- Материалы проекта: ссылки ---------- */
+.link-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
+.link-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px;
+  border: 1px solid #dfe6f7; border-radius: 999px; background: #f6f8ff;
+  color: #1d2f5e; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.link-chip:hover { border-color: #c4d1f5; }
+.link-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+.link-list li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+.link-host { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.danger-text { color: #d23b3b; }
+.link-form { display: grid; gap: 10px; margin-top: 12px; }

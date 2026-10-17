@@ -1075,6 +1075,8 @@ function renderProject(s) {
       ${BLOCKS.map((b) => mapCard(b, s, map[b.id])).join("")}
     </div>
 
+    ${linksCard(s)}
+
     <section class="card plan" id="action-plan">
       <div class="plan-head">
         <div>
@@ -1117,6 +1119,7 @@ function renderProject(s) {
     btn.addEventListener("click", () => $(btn.dataset.scroll)?.scrollIntoView({ behavior: "smooth", block: "start" }))
   );
   setupTasks(s);
+  setupLinks(s);
 
   $("delete-project").addEventListener("click", async (e) => {
     const button = e.currentTarget; // после await currentTarget уже пустой
@@ -1223,6 +1226,126 @@ function setupSoloMatch(s) {
       formError("solo-partner-error", error);
     }
   });
+}
+
+// ======================================================
+// МАТЕРИАЛЫ ПРОЕКТА: Figma, презентация, лендинг, финмодель
+// Отзыв тестировщика: «текст — хорошо, но партнёры хотят видеть, что уже сделано руками».
+// ======================================================
+
+const LINK_KINDS = {
+  figma: { icon: "🎨", text: "Прототип" },
+  deck: { icon: "📊", text: "Презентация" },
+  landing: { icon: "🌐", text: "Сайт" },
+  finmodel: { icon: "📈", text: "Финмодель" },
+  other: { icon: "📎", text: "Материал" },
+};
+const LINKS_MAX = 4;
+
+const linkHost = (url) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+};
+
+function linkChips(links) {
+  if (!Array.isArray(links) || links.length === 0) return "";
+  return `<div class="link-chips">${links.map((l) => {
+    const k = LINK_KINDS[l.kind] || LINK_KINDS.other;
+    return `<button type="button" class="link-chip" data-ext-link="${esc(l.url)}" title="${esc(l.url)}">${k.icon} ${esc(k.text)}</button>`;
+  }).join("")}</div>`;
+}
+
+function linksCard(s) {
+  const links = Array.isArray(s.links) ? s.links : [];
+  return `<section class="card" id="links-card">
+    <p class="eyebrow">Материалы проекта</p>
+    <h3>Что уже сделано руками</h3>
+    <p class="muted">Прототип, презентация, сайт или финмодель — кандидаты увидят ссылки в карточке проекта.</p>
+    ${links.length ? `<ul class="link-list">${links.map((l, i) => {
+      const k = LINK_KINDS[l.kind] || LINK_KINDS.other;
+      return `<li><button type="button" class="link-chip" data-ext-link="${esc(l.url)}">${k.icon} ${esc(k.text)}</button>
+        <span class="muted small link-host">${esc(linkHost(l.url))}</span>
+        <button type="button" class="text-btn danger-text" data-link-remove="${i}" aria-label="Удалить ссылку">Удалить</button></li>`;
+    }).join("")}</ul>` : ""}
+    <form id="link-form" class="link-form" hidden novalidate>
+      <label class="field"><span>Что это</span>
+        <select class="input" name="kind">
+          ${Object.entries(LINK_KINDS).map(([v, k]) => `<option value="${v}">${k.icon} ${k.text}</option>`).join("")}
+        </select></label>
+      <label class="field"><span>Ссылка</span>
+        <input class="input" name="url" type="url" inputmode="url" maxlength="500" placeholder="https://www.figma.com/..."></label>
+      <p class="hint">Проверьте, что доступ открыт по ссылке. Видят только пользователи SOBRA, которые смотрят ваш проект.</p>
+      <p class="form-error" id="link-error" hidden></p>
+      <div class="actions">
+        <button class="btn secondary small" type="button" id="link-cancel">Отмена</button>
+        <button class="btn primary small" type="submit">Добавить</button>
+      </div>
+    </form>
+    ${links.length < LINKS_MAX ? `<div class="actions" id="link-add-row"><button class="btn secondary small" type="button" id="link-add">+ Добавить ссылку</button></div>` : ""}
+  </section>`;
+}
+
+function setupLinks(s) {
+  const links = Array.isArray(s.links) ? s.links : [];
+  const form = $("link-form");
+  const save = async (next, button, text) => {
+    const updated = await busy(button, text, () => api("PATCH", `/api/startups/${s.id}`, { links: next }));
+    renderProject(updated);
+    $("links-card")?.scrollIntoView({ block: "center" });
+  };
+  $("link-add")?.addEventListener("click", () => {
+    form.hidden = false;
+    $("link-add-row").hidden = true;
+    form.elements.url.focus();
+  });
+  $("link-cancel").addEventListener("click", () => {
+    form.hidden = true;
+    if ($("link-add-row")) $("link-add-row").hidden = false;
+  });
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    formError("link-error", null);
+    let url = form.elements.url.value.trim();
+    if (url && !/^[a-z]+:\/\//i.test(url)) url = "https://" + url; // «figma.com/…» без протокола — тоже примем
+    if (!/^https:\/\/[^\s/]+\.[^\s]+$/i.test(url)) {
+      formError("link-error", new Error("Вставьте ссылку вида https://…"));
+      return;
+    }
+    try {
+      await save([...links, { kind: form.elements.kind.value, url }], form.querySelector("button[type=submit]"), "Сохраняем…");
+      toast("Ссылка добавлена — кандидаты увидят её в карточке проекта");
+    } catch (error) {
+      formError("link-error", error);
+    }
+  });
+  document.querySelectorAll("[data-link-remove]").forEach((button) =>
+    button.addEventListener("click", async () => {
+      const index = Number(button.dataset.linkRemove);
+      try {
+        await save(links.filter((_, i) => i !== index), button, "…");
+        toast("Ссылка удалена");
+      } catch (error) {
+        toast(error.message, "error");
+      }
+    })
+  );
+}
+
+// Внешние ссылки (материалы проекта) — только https. Внутри MAX открываются через MAX Bridge.
+function openExternal(event) {
+  const button = event.target.closest("[data-ext-link]");
+  if (!button) return;
+  const url = button.dataset.extLink;
+  if (!/^https:\/\//i.test(url)) return;
+  try {
+    if (WebApp && typeof WebApp.openLink === "function") WebApp.openLink(url);
+    else window.open(url, "_blank", "noopener");
+  } catch {
+    window.open(url, "_blank", "noopener");
+  }
 }
 
 // Action Plan: методика от ИИ и шаг Update
@@ -2057,6 +2180,7 @@ function projectForCandidate(s, ai) {
     <p class="muted">Ищет: ${esc(seekingText(s))}</p>
     ${s.founder_verified ? `<div class="chips">${verifiedBadge(true, "✓ Основатель подтвердил телефон")}</div>` : ""}
     ${rows.map(([k, v]) => `<p class="answer"><b>${k}.</b> ${esc(v)}</p>`).join("")}
+    ${linkChips(s.links)}
     ${renderAi(ai, "Почему вы подходите")}
     ${isOwn
       ? `<p class="muted">Это ваш проект</p>`
@@ -2409,6 +2533,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupSideMenu();
   setupNavigation();
   setupStart();
+  document.addEventListener("click", openExternal);
   setupIdeaForm();
   setupProfileForm();
   setupAvatar();
