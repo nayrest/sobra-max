@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#f7f9ff">
   <title>SOBRA AI</title>
-  <link rel="stylesheet" href="style.css?v=2026-10-17-2">
+  <link rel="stylesheet" href="style.css?v=2026-10-17-3">
   <!-- MAX Bridge: даёт window.WebApp.initData для авторизации -->
   <script src="https://st.max.ru/js/max-web-app.js"></script>
 </head>
@@ -89,6 +89,13 @@
         <button class="text-btn" type="button" id="idea-draft-clear">Очистить форму</button>
       </p>
 
+      <!-- Пошаговый режим (отзыв тестировщика: «много текста, хочется интерактив»): один вопрос на экран -->
+      <div class="wizard-top" id="wizard-top">
+        <div class="wizard-progress" aria-hidden="true"><span id="wizard-bar"></span></div>
+        <p class="wizard-count"><span id="wizard-count">Шаг 1 из 10</span>
+          <button class="text-btn" type="button" id="wizard-toggle">Показать все вопросы сразу</button></p>
+      </div>
+
       <div class="card autofill-card">
         <div class="step-head"><span class="step-num ai">✨</span><div><h2>Быстрый старт</h2>
           <p class="muted">Опишите идею своими словами — ИИ заполнит форму черновиком, а вы проверите и поправите.</p></div></div>
@@ -142,9 +149,14 @@
         </div>
 
         <p class="form-error" id="idea-error" hidden></p>
-        <div class="actions">
+        <div class="actions form-actions">
           <button class="btn secondary" type="button" data-back="projects">Отмена</button>
           <button class="btn primary" type="submit">Сформировать карту проекта →</button>
+        </div>
+        <div class="wizard-nav" id="wizard-nav">
+          <button class="btn secondary" type="button" id="wizard-back">← Назад</button>
+          <button class="text-btn" type="button" id="wizard-skip">Пропустить</button>
+          <button class="btn primary" type="button" id="wizard-next">Дальше →</button>
         </div>
       </form>
     </section>
@@ -391,6 +403,6 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
-  <script src="app.js?v=2026-10-17-2"></script>
+  <script src="app.js?v=2026-10-17-3"></script>
 </body>
 </html>

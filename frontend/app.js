@@ -620,6 +620,142 @@ function applyPartnerMode() {
   $("seeking-field").hidden = !want;
   const partnerField = $("idea-form").elements.partner_needed.closest(".field");
   if (partnerField) partnerField.hidden = !want;
+  renderWizard(); // шаг «Кого ищете» появляется или исчезает
+}
+
+// ======================================================
+// ПОШАГОВЫЙ РЕЖИМ ПРОВЕРКИ ИДЕИ
+// Отзыв тестировщика: «очень много текста — пугает; хочется интерактив».
+// Та же форма, но по одному вопросу на экран: прогресс, «Назад», «Дальше», «Пропустить».
+// Первый шаг — «Быстрый старт»: пара предложений, остальное заполнит ИИ.
+// Можно переключиться на всю форму сразу — выбор запоминается на устройстве.
+// ======================================================
+
+const WIZARD_OFF_KEY = "sobra:wizard-off";
+const wizard = { on: true, i: 0, ready: false };
+
+function wizardSteps() {
+  const steps = [
+    { id: "quick", title: "Быстрый старт", next: "Дальше без ИИ →" },
+    { id: "about", title: "О проекте", required: ["name", "category", "market_type", "stage"] },
+    ...BLOCKS.map((b) => ({ id: b.id, title: b.title, required: b.required ? [b.field] : [], optional: !b.required })),
+  ];
+  if (wantsPartner()) steps.push({ id: "partner", title: "Кого ищете", required: ["seeking", "partner_needed"] });
+  return steps;
+}
+
+function setupWizard() {
+  const form = $("idea-form");
+  const view = $("view-idea");
+  // Помечаем, какие поля к какому шагу относятся
+  view.querySelector(".autofill-card").dataset.wstep = "quick";
+  for (const name of ["name", "category", "market_type", "stage"]) form.elements[name].closest(".field").dataset.wstep = "about";
+  form.querySelector(".switch-field").dataset.wstep = "about";
+  for (const b of BLOCKS) form.elements[b.field].closest(".field").dataset.wstep = b.id;
+  const partnerField = form.elements.partner_needed.closest(".field");
+  partnerField.dataset.wstep = "partner";
+  partnerField.before($("seeking-field")); // «Кого ищете» — рядом с вопросом о партнёре, на одном шаге
+  $("seeking-field").dataset.wstep = "partner";
+
+  try {
+    wizard.on = localStorage.getItem(WIZARD_OFF_KEY) !== "1";
+  } catch {
+    /* хранилище недоступно — по умолчанию пошагово */
+  }
+
+  $("wizard-next").addEventListener("click", wizardNext);
+  $("wizard-back").addEventListener("click", () => wizardGo(wizard.i - 1));
+  $("wizard-skip").addEventListener("click", () => wizardGo(wizard.i + 1));
+  $("wizard-toggle").addEventListener("click", () => {
+    wizard.on = !wizard.on;
+    try {
+      if (wizard.on) localStorage.removeItem(WIZARD_OFF_KEY);
+      else localStorage.setItem(WIZARD_OFF_KEY, "1");
+    } catch {
+      /* не запомним — не страшно */
+    }
+    renderWizard();
+  });
+  // Начал отвечать — подсказку «ответьте на вопрос» убираем
+  form.addEventListener("input", () => { if (wizard.on) formError("idea-error", null); });
+  // Enter в однострочном поле — «Дальше», а не отправка всей формы
+  form.addEventListener("keydown", (e) => {
+    if (wizard.on && e.key === "Enter" && e.target.tagName === "INPUT") {
+      e.preventDefault();
+      wizardNext();
+    }
+  });
+  wizard.ready = true;
+  renderWizard();
+}
+
+function wizardGo(index, focus = true) {
+  const steps = wizardSteps();
+  wizard.i = Math.max(0, Math.min(index, steps.length - 1));
+  formError("idea-error", null);
+  renderWizard(focus);
+  if (wizard.on) window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+// Перейти к шагу, где находится поле (например, обязательное и пустое)
+function wizardGoToField(name) {
+  const index = wizardSteps().findIndex((st) => (st.required || []).includes(name));
+  if (index >= 0) wizardGo(index);
+}
+
+function wizardNext() {
+  const form = $("idea-form");
+  const steps = wizardSteps();
+  const step = steps[wizard.i];
+  const empty = (step.required || []).find((name) => !form.elements[name].value.trim());
+  if (empty) {
+    form.elements[empty].focus();
+    formError("idea-error", new Error("Ответьте на этот вопрос — без него карта не построится. Можно коротко, потом уточните."));
+    return;
+  }
+  if (wizard.i === steps.length - 1) {
+    form.requestSubmit(); // последний шаг — строим карту
+    return;
+  }
+  wizardGo(wizard.i + 1);
+}
+
+function renderWizard(focus = false) {
+  if (!wizard.ready) return;
+  const view = $("view-idea");
+  const form = $("idea-form");
+  view.classList.toggle("wizard-on", wizard.on);
+  $("wizard-toggle").textContent = wizard.on ? "Показать все вопросы сразу" : "Отвечать по одному вопросу";
+  $("wizard-nav").hidden = !wizard.on;
+
+  if (!wizard.on) {
+    view.querySelectorAll(".wstep-hide").forEach((el) => el.classList.remove("wstep-hide"));
+    return;
+  }
+
+  const steps = wizardSteps();
+  wizard.i = Math.max(0, Math.min(wizard.i, steps.length - 1));
+  const step = steps[wizard.i];
+  const last = wizard.i === steps.length - 1;
+
+  view.querySelectorAll("[data-wstep]").forEach((el) => el.classList.toggle("wstep-hide", el.dataset.wstep !== step.id));
+  // Карточки формы показываем, только если в них есть поля текущего шага
+  form.querySelectorAll(":scope > .card").forEach((card) =>
+    card.classList.toggle("wstep-hide", !card.querySelector(`[data-wstep="${step.id}"]`))
+  );
+
+  $("wizard-count").textContent = `Шаг ${wizard.i + 1} из ${steps.length} · ${step.title}`;
+  $("wizard-bar").style.width = `${Math.round(((wizard.i + 1) / steps.length) * 100)}%`;
+  $("wizard-back").hidden = wizard.i === 0;
+  $("wizard-skip").hidden = !step.optional;
+  $("wizard-next").textContent = last ? "Сформировать карту проекта →" : step.next || "Дальше →";
+
+  if (focus) {
+    const target = step.id === "quick"
+      ? $("autofill-text")
+      : view.querySelector(`[data-wstep="${step.id}"]:not(.switch-field) .input`);
+    if (target) setTimeout(() => target.focus({ preventScroll: true }), 50);
+  }
 }
 
 function setupIdeaForm() {
@@ -650,6 +786,7 @@ function setupIdeaForm() {
   window.addEventListener("pagehide", saveOnHide);
   $("autofill-text").addEventListener("input", saveDraft); // поле «Быстрого старта» стоит вне формы
   $("want-partner").addEventListener("change", applyPartnerMode);
+  setupWizard();
 
   $("open-idea").addEventListener("click", async () => {
     formError("idea-error", null);
@@ -659,6 +796,7 @@ function setupIdeaForm() {
     $("idea-draft-note").hidden = true;
     // Пришёл «только проверить идею» — вопросов о партнёре по умолчанию нет
     $("want-partner").checked = state.intent !== "idea";
+    wizard.i = 0; // пошаговый режим начинается с «Быстрого старта»
     applyPartnerMode();
     show("idea");
 
@@ -671,8 +809,12 @@ function setupIdeaForm() {
       if (typeof draft.autofill_text === "string") $("autofill-text").value = draft.autofill_text;
       if (draft.want_partner === "yes" || draft.want_partner === "no") {
         $("want-partner").checked = draft.want_partner === "yes";
-        applyPartnerMode();
       }
+      // Черновик с ответами — продолжаем с первого незаполненного обязательного шага
+      const steps = wizardSteps();
+      const firstEmpty = steps.findIndex((st, i) => i > 0 && (st.required || []).some((n) => !form.elements[n].value.trim()));
+      wizard.i = firstEmpty > 0 ? firstEmpty : 1;
+      applyPartnerMode();
       $("idea-draft-note").hidden = false;
       toast("Восстановили незаконченную проверку идеи");
     }
@@ -703,8 +845,13 @@ function setupIdeaForm() {
         }
       }
       saveDraft();
-      toast("Черновик готов. Проверьте ответы и поправьте, где ИИ ошибся.");
-      form.querySelector(".card").scrollIntoView({ behavior: "smooth", block: "start" });
+      if (wizard.on) {
+        toast("ИИ заполнил ответы. Проверьте каждый шаг и нажимайте «Дальше».");
+        wizardGo(1);
+      } else {
+        toast("Черновик готов. Проверьте ответы и поправьте, где ИИ ошибся.");
+        form.querySelector(".card").scrollIntoView({ behavior: "smooth", block: "start" });
+      }
     } catch (error) {
       formError("autofill-error", error);
     }
@@ -715,6 +862,7 @@ function setupIdeaForm() {
     form.reset();
     $("autofill-text").value = "";
     $("want-partner").checked = state.intent !== "idea";
+    wizard.i = 0;
     applyPartnerMode();
     draftClear(draftKey("idea-draft"));
     $("idea-draft-note").hidden = true;
@@ -731,6 +879,7 @@ function setupIdeaForm() {
       ...(want ? ["seeking", "partner_needed"] : [])];
     const emptyField = required.find((name) => !f[name].value.trim());
     if (emptyField) {
+      if (wizard.on) wizardGoToField(emptyField);
       f[emptyField].focus();
       formError("idea-error", new Error("Заполните поля со звёздочкой. Остальные можно дописать позже — они попадут в карту как «не проработано»."));
       return;
