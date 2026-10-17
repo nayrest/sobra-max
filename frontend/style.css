@@ -110,10 +110,15 @@ button { cursor: pointer; }
 }
 
 .tabbar button {
-  flex: 1;
+  /* min-width: 0 — кнопки сжимаются, а не выталкивают «Профиль» за край на узких экранах (iPhone SE, крупный шрифт в iOS) */
+  flex: 1 1 0; min-width: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  padding: 0 2px;
   border: 0; background: transparent; border-radius: 12px;
-  color: #6a7797; font-size: 11px; font-weight: 600;
+  color: #6a7797; font-size: clamp(9.5px, 3vw, 11px); font-weight: 600;
+}
+.tabbar button > span:last-child {
+  max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
 
 .tabbar svg {
@@ -572,7 +577,8 @@ button.contact-link { border: 0; cursor: pointer; font: inherit; font-weight: 70
 
 /* ---------- Поведение «как приложение», а не как веб-страница ---------- */
 
-html, body { overscroll-behavior: none; }                 /* без «оттягивания» и обновления жестом */
+html, body { overscroll-behavior: none; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; } /* iOS не увеличивает шрифт сам и не ломает вёрстку */                 /* без «оттягивания» и обновления жестом */
 * { -webkit-tap-highlight-color: transparent; }          /* без серой подсветки при нажатии */
 button, .tabbar, .journey, .badge, .tab-badge, .brand, .btn, .text-btn, .contact-link {
   -webkit-user-select: none; user-select: none;           /* кнопки не выделяются как текст */
