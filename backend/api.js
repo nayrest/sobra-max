@@ -14,6 +14,7 @@ const aiMatching = require("./ai-matching");
 const ideaCheck = require("./idea-check");
 const actionPlan = require("./action-plan");
 const { autofillIdea } = require("./idea-autofill");
+const skillsLib = require("./skills");
 
 // ======================================================
 // СПРАВОЧНИКИ (совпадают со значениями, которые пишет бот)
@@ -109,6 +110,21 @@ function parseLinks(value) {
     }
     return { kind, url: url.toString() };
   });
+}
+
+function parseSkills(value) {
+  const { skills, error } = skillsLib.normalizeSkills(value);
+  if (error) throw new ApiError(400, error);
+  return skills;
+}
+
+// Сначала те, у кого больше общих тегов (сортировка устойчивая: при равенстве порядок прежний).
+// Это решает, кого ИИ оценит первым (он смотрит только первых 8), и порядок, если ИИ недоступен.
+function bySkillOverlap(items, common) {
+  return items
+    .map((item, index) => ({ item, index, n: common(item).length }))
+    .sort((a, b) => b.n - a.n || a.index - b.index)
+    .map(({ item }) => item);
 }
 
 function requireOneOf(value, allowed, field) {
@@ -628,6 +644,7 @@ function createApi({ notify = {} } = {}) {
     }
     for (const field of OPTIONAL_IDEA) data[field] = optionalText(body, field);
     data.links = body.links === undefined ? [] : parseLinks(body.links);
+    data.skills = body.skills === undefined ? [] : parseSkills(body.skills);
 
     await enforceDailyLimit(req, "startups");
     const startup = await db.saveStartupDraft(req.user.userId, data);
@@ -679,7 +696,12 @@ function createApi({ notify = {} } = {}) {
     // Ссылки на материалы — не часть карты: сохраняем отдельно, без пересчёта
     let withLinks = null;
     if ("links" in body) withLinks = await db.updateLinks(startup.id, req.user.userId, parseLinks(body.links));
-    if (withLinks && Object.keys(body).every((k) => k === "links")) return res.json(await withTasks(withLinks));
+    // Теги навыков — тоже не часть карты
+    let withSkills = null;
+    if ("skills" in body) withSkills = await db.updateSkills(startup.id, req.user.userId, parseSkills(body.skills));
+    if ((withLinks || withSkills) && Object.keys(body).every((k) => k === "links" || k === "skills")) {
+      return res.json(await withTasks(withSkills || withLinks));
+    }
 
     // 3000 символов: в блок дописываются результаты проверок (шаг Update)
     for (const field of REQUIRED_IDEA) {
@@ -828,10 +850,13 @@ function createApi({ notify = {} } = {}) {
     // Цель «развиваю свою идею» поиск не меняет: человек просто смотрит чужие проекты
     const savedGoal = profile?.goal === "own" ? "own" : goal;
     await db.saveSearchProfile(req.user.userId, { ...criteria, goal: savedGoal, about });
-    const found = await db.findMatches(criteria, req.user.userId);
+    const mySkills = skillsLib.asList(profile?.skills);
+    const common = (m) => skillsLib.commonSkills(m.startup.skills, mySkills);
+    const found = bySkillOverlap(await db.findMatches(criteria, req.user.userId), common)
+      .map((m) => ({ ...m, skills_common: common(m) }));
 
     // ИИ оценивает только то, что прошло фильтры. При сбое ИИ поиск всё равно отвечает.
-    const enriched = await aiMatching.enrichMatches(about, criteria, found);
+    const enriched = await aiMatching.enrichMatches(about, { ...criteria, skills: mySkills }, found);
     const ai = enriched.ai;
     // Уже откликался — вместо кнопки «Откликнуться» покажем статус отклика
     const myOffers = await db.getMyOfferStatuses(req.user.userId);
@@ -903,6 +928,7 @@ function createApi({ notify = {} } = {}) {
       goal: profile?.goal || null,
       category: profile?.category || "Любая",
       about: profile?.about || "",
+      skills: skillsLib.asList(profile?.skills),
       visible: Boolean(profile?.visible),
       consent: Boolean(profile?.contacts_consent_at),
       avatar_url: avatarUrl(profile?.avatar_token),
@@ -941,6 +967,8 @@ function createApi({ notify = {} } = {}) {
     }
     const fullName = [lastName, firstName, patronymic].filter(Boolean).join(" ");
     const maxLink = parseMaxLink(body.max_link);
+    // Не передали — оставляем прежние теги (старые версии приложения поле не шлют)
+    const skills = body.skills === undefined ? undefined : parseSkills(body.skills);
 
     await db.saveSearchProfile(req.user.userId, {
       goal,
@@ -955,6 +983,7 @@ function createApi({ notify = {} } = {}) {
       full_name: fullName,
       email,
       phone,
+      skills,
     });
     await db.saveContactsConsent(req.user.userId);
     if (maxLink !== undefined) await db.saveMaxLink(req.user.userId, maxLink);
@@ -973,6 +1002,7 @@ function createApi({ notify = {} } = {}) {
       goal,
       category: body.category || "Любая",
       about,
+      skills: skillsLib.asList(saved?.skills),
       visible,
       consent: true,
       avatar_url: avatarUrl(current?.avatar_token),
@@ -1072,7 +1102,10 @@ function createApi({ notify = {} } = {}) {
 
   app.get("/api/startups/:id/candidates", wrap(async (req, res) => {
     const startup = await getOwnPublishedStartup(req);
-    const found = await db.getCandidatesForStartup(startup);
+    const needed = skillsLib.asList(startup.skills);
+    const common = (c) => skillsLib.commonSkills(needed, c.skills);
+    // Берём шире, чем показываем: после сортировки по тегам наверх попадут люди с нужными навыками
+    const found = bySkillOverlap(await db.getCandidatesForStartup(startup, 50), common).slice(0, 20);
     const { candidates, ai } = await aiMatching.rankCandidates(startup, found);
     await logAiMatches(
       candidates
@@ -1097,6 +1130,8 @@ function createApi({ notify = {} } = {}) {
         phone_verified: Boolean(c.phone_verified),
         goal: c.goal,
         about: c.about,
+        skills: skillsLib.asList(c.skills),
+        skills_common: common(c),
         ai: c.ai || null,
         invited: invited.has(Number(c.user_id)),
       })),

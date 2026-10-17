@@ -268,3 +268,8 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS intent_at TIMESTAMPTZ;
 -- Ссылки на готовые материалы проекта (отзыв тестировщика: «партнёры хотят видеть, что уже сделано руками»):
 -- [{"kind": "figma" | "deck" | "landing" | "finmodel" | "other", "url": "https://..."}], не больше 4
 ALTER TABLE startups ADD COLUMN IF NOT EXISTS links JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+-- Теги навыков (отзыв тестировщика: «#B2B_sales, #Python, #маркетинг»):
+-- у кандидата — что умеет, у проекта — какие навыки нужны партнёру. ["Python", "B2B_продажи"], не больше 10
+ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS skills JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE startups ADD COLUMN IF NOT EXISTS skills JSONB NOT NULL DEFAULT '[]'::jsonb;

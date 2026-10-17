@@ -103,9 +103,9 @@ async function saveStartupDraft(founderId, data) {
     `INSERT INTO startups (
        founder_id, name, category, market_type, stage, seeking, investment_amount,
        customer, problem, solution, competitors, traction, business_model, economics, partner_needed,
-       links, status
+       links, skills, status
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'draft')
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'draft')
      RETURNING *`,
     [
       founderId, data.name, data.category, data.market_type, data.stage, data.seeking,
@@ -113,6 +113,7 @@ async function saveStartupDraft(founderId, data) {
       data.customer || null, data.problem || null, data.solution || null, data.competitors || null,
       data.traction || null, data.business_model || null, data.economics || null, data.partner_needed || null,
       JSON.stringify(data.links || []),
+      JSON.stringify(data.skills || []),
     ]
   );
 
@@ -124,6 +125,15 @@ async function updateLinks(startupId, founderId, links) {
   await pool.query(
     `UPDATE startups SET links = $3 WHERE id = $1 AND founder_id = $2`,
     [startupId, founderId, JSON.stringify(links)]
+  );
+  return getStartupById(startupId);
+}
+
+// Какие навыки нужны партнёру — теги, список целиком
+async function updateSkills(startupId, founderId, skills) {
+  await pool.query(
+    `UPDATE startups SET skills = $3 WHERE id = $1 AND founder_id = $2`,
+    [startupId, founderId, JSON.stringify(skills)]
   );
   return getStartupById(startupId);
 }
@@ -299,9 +309,9 @@ async function saveSearchProfile(userId, criteria) {
   await pool.query(
     `INSERT INTO search_profiles (
        user_id, goal, category, min_stage, max_investment, about, visible,
-       full_name, last_name, first_name, patronymic, email, phone
+       full_name, last_name, first_name, patronymic, email, phone, skills
      )
-     VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, FALSE), $8, $9, $10, $11, $12, $13)
+     VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, FALSE), $8, $9, $10, $11, $12, $13, COALESCE($14::jsonb, '[]'::jsonb))
      ON CONFLICT (user_id) DO UPDATE SET
        goal = EXCLUDED.goal,
        category = EXCLUDED.category,
@@ -314,7 +324,8 @@ async function saveSearchProfile(userId, criteria) {
        first_name = COALESCE($10, search_profiles.first_name),
        patronymic = COALESCE($11, search_profiles.patronymic),
        email = COALESCE($12, search_profiles.email),
-       phone = COALESCE($13, search_profiles.phone)`,
+       phone = COALESCE($13, search_profiles.phone),
+       skills = COALESCE($14::jsonb, search_profiles.skills)`,
     [
       userId,
       criteria.goal,
@@ -329,6 +340,7 @@ async function saveSearchProfile(userId, criteria) {
       criteria.patronymic || null,
       criteria.email || null,
       criteria.phone || null,
+      Array.isArray(criteria.skills) ? JSON.stringify(criteria.skills) : null,
     ]
   );
 }
@@ -499,7 +511,7 @@ async function getCandidatesForStartup(startup, limit = 20) {
   const goal = SEEKING_TO_GOAL[startup.seeking];
 
   const { rows } = await pool.query(
-    `SELECT sp.user_id, sp.goal, sp.category, sp.about, sp.max_investment, sp.avatar_token, u.name,
+    `SELECT sp.user_id, sp.goal, sp.category, sp.about, sp.skills, sp.max_investment, sp.avatar_token, u.name,
        (sp.phone_verified_at IS NOT NULL) AS phone_verified
      FROM search_profiles sp
      LEFT JOIN users u ON u.user_id = sp.user_id
@@ -963,6 +975,7 @@ async function demoRespondToInvites(typeByGoal) {
 module.exports = {
   pool,
   updateLinks,
+  updateSkills,
   getMe,
   saveIntent,
   getMyOfferStatuses,

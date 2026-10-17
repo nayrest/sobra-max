@@ -98,6 +98,8 @@ SELECT COUNT(*) AS demo_candidates
 FROM search_profiles
 WHERE user_id BETWEEN 900000000101 AND 900000000199;
 
+-- Теги навыков демо-пользователей и проектов — в scripts/demo-skills.sql (запустить после этого файла)
+
 -- Проверка: сколько демо-проектов в базе
 SELECT COUNT(*) AS demo_startups
 FROM startups

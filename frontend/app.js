@@ -522,7 +522,7 @@ function questionField({ field, q, hint, required }) {
 // и при сворачивании приложения). При открытии формы берётся более свежий из двух.
 // ======================================================
 
-const IDEA_FORM_FIELDS = ["name", "category", "market_type", "stage", "seeking", ...BLOCKS.map((b) => b.field), PARTNER_QUESTION.field];
+const IDEA_FORM_FIELDS = ["name", "category", "market_type", "stage", "seeking", ...BLOCKS.map((b) => b.field), PARTNER_QUESTION.field, "skills"];
 const DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1000; // черновик старше 30 дней не восстанавливаем
 
 // Ключ на сервере: «idea-draft» или «task-draft:15». На устройстве — с номером пользователя.
@@ -620,6 +620,7 @@ function applyPartnerMode() {
   $("seeking-field").hidden = !want;
   const partnerField = $("idea-form").elements.partner_needed.closest(".field");
   if (partnerField) partnerField.hidden = !want;
+  if ($("idea-skills-field")) $("idea-skills-field").hidden = !want;
   renderWizard(); // шаг «Кого ищете» появляется или исчезает
 }
 
@@ -656,6 +657,7 @@ function setupWizard() {
   partnerField.dataset.wstep = "partner";
   partnerField.before($("seeking-field")); // «Кого ищете» — рядом с вопросом о партнёре, на одном шаге
   $("seeking-field").dataset.wstep = "partner";
+  $("idea-skills-field").dataset.wstep = "partner";
 
   try {
     wizard.on = localStorage.getItem(WIZARD_OFF_KEY) !== "1";
@@ -760,7 +762,9 @@ function renderWizard(focus = false) {
 
 function setupIdeaForm() {
   const form = $("idea-form");
-  $("idea-questions").innerHTML = [...BLOCKS, { ...PARTNER_QUESTION, required: true }].map(questionField).join("");
+  $("idea-questions").innerHTML = [...BLOCKS, { ...PARTNER_QUESTION, required: true }].map(questionField).join("") +
+    `<div class="field wide" id="idea-skills-field"><span>Какие навыки нужны <span class="field-hint">— по тегам ИИ быстрее найдёт людей</span></span>${skillPickerHtml()}</div>`;
+  setupSkillPicker($("idea-skills-field").querySelector("[data-skill-picker]"));
 
   let saveTimer = null;
   const saveNow = () => {
@@ -798,6 +802,7 @@ function setupIdeaForm() {
     $("want-partner").checked = state.intent !== "idea";
     wizard.i = 0; // пошаговый режим начинается с «Быстрого старта»
     applyPartnerMode();
+    refreshSkillPickers(form);
     show("idea");
 
     // Черновик может прийти с сервера не мгновенно — подставляем, только если человек ещё ничего не начал вводить
@@ -815,6 +820,7 @@ function setupIdeaForm() {
       const firstEmpty = steps.findIndex((st, i) => i > 0 && (st.required || []).some((n) => !form.elements[n].value.trim()));
       wizard.i = firstEmpty > 0 ? firstEmpty : 1;
       applyPartnerMode();
+      refreshSkillPickers(form);
       $("idea-draft-note").hidden = false;
       toast("Восстановили незаконченную проверку идеи");
     }
@@ -864,6 +870,7 @@ function setupIdeaForm() {
     $("want-partner").checked = state.intent !== "idea";
     wizard.i = 0;
     applyPartnerMode();
+    refreshSkillPickers(form);
     draftClear(draftKey("idea-draft"));
     $("idea-draft-note").hidden = true;
     formError("idea-error", null);
@@ -897,6 +904,7 @@ function setupIdeaForm() {
     if (want) {
       body.seeking = f.seeking.value;
       body.partner_needed = f.partner_needed.value.trim();
+      body.skills = pickerValue(form.querySelector("[data-skill-picker]"));
     }
 
     // В пошаговом режиме нажимают «Построить карту» — блокируем именно её, а не скрытую кнопку формы.
@@ -910,6 +918,7 @@ function setupIdeaForm() {
       draftClear(draftKey("idea-draft"));
       $("idea-draft-note").hidden = true;
       form.reset();
+      refreshSkillPickers(form);
       toast("Карта проекта готова");
       openProject(startup.id);
     } catch (error) {
@@ -1101,6 +1110,7 @@ function renderProject(s) {
       <p class="eyebrow">Шаг 5 · AI Match</p>
       <h3>${esc(seekingText(s))}</h3>
       <p>${esc(s.partner_needed || "Не указано")}</p>
+      ${projectSkillsBlock(s)}
       ${missingTitles.length ? `<p class="muted">Проекту пока не хватает: ${esc(missingTitles.slice(0, 3).join(", "))}. Партнёр с опытом в этом ускорит проверку.</p>` : ""}
       ${published
         ? `<button class="btn primary block" type="button" id="go-match">Подобрать партнёра →</button>
@@ -1120,6 +1130,7 @@ function renderProject(s) {
   );
   setupTasks(s);
   setupLinks(s);
+  setupProjectSkills(s);
 
   $("delete-project").addEventListener("click", async (e) => {
     const button = e.currentTarget; // после await currentTarget уже пустой
@@ -1164,6 +1175,51 @@ function renderProject(s) {
   }
 }
 
+// Теги нужных навыков у проекта: показать и поправить без пересчёта карты
+function projectSkillsBlock(s) {
+  const tags = Array.isArray(s.skills) ? s.skills : [];
+  return `<div id="project-skills">
+    ${tags.length ? skillTags(tags) : `<p class="muted small">Добавьте теги навыков — по ним видно совпадения с кандидатами, и ИИ точнее подбирает людей.</p>`}
+    <button class="text-btn" type="button" id="skills-edit">${tags.length ? "Изменить теги" : "+ Добавить теги навыков"}</button>
+    <form id="skills-form" class="skill-edit" hidden novalidate>
+      ${skillPickerHtml()}
+      <p class="form-error" id="skills-error" hidden></p>
+      <div class="actions">
+        <button class="btn secondary small" type="button" id="skills-cancel">Отмена</button>
+        <button class="btn primary small" type="submit">Сохранить теги</button>
+      </div>
+    </form>
+  </div>`;
+}
+
+function setupProjectSkills(s) {
+  const form = $("skills-form");
+  if (!form) return;
+  const picker = form.querySelector("[data-skill-picker]");
+  setupSkillPicker(picker);
+  const toggle = (open) => {
+    form.hidden = !open;
+    $("skills-edit").hidden = open;
+    if (open) setSkills(picker, s.skills || []);
+  };
+  $("skills-edit").addEventListener("click", () => toggle(true));
+  $("skills-cancel").addEventListener("click", () => toggle(false));
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    formError("skills-error", null);
+    try {
+      const updated = await busy(form.querySelector("button[type=submit]"), "Сохраняем…", () =>
+        api("PATCH", `/api/startups/${s.id}`, { skills: pickerValue(picker) })
+      );
+      renderProject(updated);
+      $("match-card")?.scrollIntoView({ block: "center" });
+      toast("Теги сохранены");
+    } catch (error) {
+      formError("skills-error", error);
+    }
+  });
+}
+
 // Проект «только проверка идеи»: карта и план уже есть, партнёр — по желанию.
 // Включить подбор = указать, кого ищем; дальше обычный путь: публикация → AI Match.
 function soloMatchCard(s, missingTitles) {
@@ -1179,6 +1235,7 @@ function soloMatchCard(s, missingTitles) {
         </select></label>
       <label class="field"><span>${esc(PARTNER_QUESTION.q)} <b class="required">*</b></span>
         <textarea class="input textarea" name="partner_needed" maxlength="1000" placeholder="${esc(PARTNER_QUESTION.hint)}"></textarea></label>
+      <div class="field"><span>Какие навыки нужны</span>${skillPickerHtml()}</div>
       <p class="form-error" id="solo-partner-error" hidden></p>
       <div class="actions">
         <button class="btn secondary small" type="button" id="solo-partner-cancel">Отмена</button>
@@ -1194,6 +1251,7 @@ function soloMatchCard(s, missingTitles) {
 
 function setupSoloMatch(s) {
   const form = $("solo-partner-form");
+  setupSkillPicker(form.querySelector("[data-skill-picker]"));
   const toggle = (open) => {
     form.hidden = !open;
     $("solo-enable").hidden = open;
@@ -1212,7 +1270,7 @@ function setupSoloMatch(s) {
     }
     try {
       const updated = await busy(form.querySelector("button[type=submit]"), "Сохраняем…", () =>
-        api("PATCH", `/api/startups/${s.id}`, { seeking, partner_needed: partner })
+        api("PATCH", `/api/startups/${s.id}`, { seeking, partner_needed: partner, skills: pickerValue(form.querySelector("[data-skill-picker]")) })
       );
       renderProject(updated);
       toast("Готово. Опубликуйте проект — и ИИ подберёт людей");
@@ -1332,6 +1390,136 @@ function setupLinks(s) {
       }
     })
   );
+}
+
+// ======================================================
+// ТЕГИ НАВЫКОВ
+// Отзыв тестировщика: «нужны теги — #B2B_sales, #Python, #маркетинг».
+// У кандидата — что умеет, у проекта — кого не хватает. Совпадения видны на карточках
+// сразу, без ИИ, а ИИ учитывает теги при оценке.
+// ======================================================
+
+const SKILLS_MAX = 10;
+const SKILL_SUGGESTIONS = [
+  "Python", "JavaScript", "Backend", "Frontend", "Мобильная_разработка", "UX/UI", "Дизайн",
+  "Data_Science", "ML", "1С", "Маркетинг", "SMM", "Продажи", "B2B_продажи", "Финансы",
+  "Юриспруденция", "Операционка", "Управление_проектами", "Аналитика", "Контент",
+];
+
+const skillKey = (tag) => String(tag).toLowerCase().replace(/ё/g, "е").replace(/[-_]+/g, "_");
+
+function cleanSkill(raw) {
+  const tag = String(raw || "").trim().replace(/^#+/, "").trim().replace(/\s+/g, "_");
+  if (!tag || tag.length > 30 || !/^[\p{L}\p{N}][\p{L}\p{N}_+#./-]*$/u.test(tag)) return null;
+  return tag;
+}
+
+// Только показать. common — совпавшие теги подсвечиваются зелёным
+function skillTags(tags, common = []) {
+  if (!Array.isArray(tags) || tags.length === 0) return "";
+  const hit = new Set((common || []).map(skillKey));
+  return `<div class="skill-tags">${tags.map((t) =>
+    `<span class="skill-tag${hit.has(skillKey(t)) ? " match" : ""}">#${esc(t)}</span>`).join("")}</div>`;
+}
+
+// Сами совпавшие теги уже подсвечены — здесь только число
+const skillMatchNote = (common, text = "Совпадений по навыкам") =>
+  Array.isArray(common) && common.length ? `<p class="skill-match-note">✓ ${text}: ${common.length}</p>` : "";
+
+// Выбор тегов. Значение хранится в скрытом поле name="skills" через запятую —
+// так теги попадают в черновик формы вместе с остальными полями.
+const SKILL_SUGGEST_SHORT = 8; // сначала — короткий список, остальные по кнопке «Ещё»
+
+function skillPickerHtml(placeholder = "Свой тег") {
+  return `<div class="skill-picker" data-skill-picker>
+    <input name="skills" hidden>
+    <div class="skill-tags" data-skill-selected></div>
+    <div class="skill-add">
+      <input class="skill-input input" type="text" maxlength="30" placeholder="${esc(placeholder)}" aria-label="Добавить свой тег">
+      <button class="btn secondary small" type="button" data-skill-add-custom>Добавить</button>
+    </div>
+    <div class="skill-tags" data-skill-suggest></div>
+    <p class="hint" data-skill-hint>Нажмите на подходящие или впишите свой. До ${SKILLS_MAX} тегов.</p>
+  </div>`;
+}
+
+const pickerValue = (root) => root.querySelector("input[name=skills]").value.split(",").filter(Boolean);
+
+function setupSkillPicker(root) {
+  const hidden = root.querySelector("input[name=skills]");
+  const input = root.querySelector(".skill-input");
+  const hint = root.querySelector("[data-skill-hint]");
+
+  const set = (list) => {
+    hidden.value = list.join(",");
+    render();
+    hidden.dispatchEvent(new Event("input", { bubbles: true })); // черновик формы сохранится
+  };
+  const add = (raw) => {
+    const list = pickerValue(root);
+    const tag = cleanSkill(raw);
+    if (!tag) {
+      hint.textContent = "Тег — одно слово или слова через «_», до 30 символов. Например: B2B_продажи";
+      return false;
+    }
+    if (list.some((t) => skillKey(t) === skillKey(tag))) return true;
+    if (list.length >= SKILLS_MAX) {
+      hint.textContent = `Не больше ${SKILLS_MAX} тегов — уберите лишний.`;
+      return false;
+    }
+    set([...list, tag]);
+    return true;
+  };
+  function render() {
+    const list = pickerValue(root);
+    const keys = new Set(list.map(skillKey));
+    root.querySelector("[data-skill-selected]").innerHTML = list
+      .map((t, i) => `<button type="button" class="skill-chip on" data-skill-remove="${i}" aria-label="Убрать тег ${esc(t)}">#${esc(t)}</button>`)
+      .join("");
+    const rest = SKILL_SUGGESTIONS.filter((t) => !keys.has(skillKey(t)));
+    const shown = root._all ? rest : rest.slice(0, SKILL_SUGGEST_SHORT);
+    root.querySelector("[data-skill-suggest]").innerHTML = list.length >= SKILLS_MAX ? "" :
+      shown.map((t) => `<button type="button" class="skill-chip" data-skill-add="${esc(t)}">+ ${esc(t)}</button>`).join("") +
+      (rest.length > shown.length ? `<button type="button" class="text-btn skill-more" data-skill-more>Ещё ${rest.length - shown.length}…</button>` : "");
+    hint.textContent = `Нажмите на подходящие или впишите свой. До ${SKILLS_MAX} тегов.`;
+  }
+  const addCustom = () => {
+    // Можно вписать несколько через запятую: «Figma, Tilda»
+    const parts = input.value.split(",").map((p) => p.trim()).filter(Boolean);
+    if (parts.length && parts.every(add)) input.value = "";
+    input.focus();
+  };
+
+  root.addEventListener("click", (e) => {
+    const plus = e.target.closest("[data-skill-add]");
+    const remove = e.target.closest("[data-skill-remove]");
+    if (plus) add(plus.dataset.skillAdd);
+    else if (remove) set(pickerValue(root).filter((_, i) => i !== Number(remove.dataset.skillRemove)));
+    else if (e.target.closest("[data-skill-add-custom]")) addCustom();
+    else if (e.target.closest("[data-skill-more]")) {
+      root._all = true;
+      render();
+    }
+  });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      e.stopPropagation(); // не «Дальше» в пошаговом режиме и не отправка формы
+      addCustom();
+    }
+  });
+  root._render = render;
+  render();
+}
+
+// После form.reset() или подстановки черновика — перерисовать выбранные теги
+function refreshSkillPickers(scope) {
+  scope.querySelectorAll("[data-skill-picker]").forEach((root) => root._render && root._render());
+}
+
+function setSkills(root, list) {
+  root.querySelector("input[name=skills]").value = (list || []).join(",");
+  root._render && root._render();
 }
 
 // Внешние ссылки (материалы проекта) — только https. Внутри MAX открываются через MAX Bridge.
@@ -1490,6 +1678,8 @@ async function loadCandidates(id) {
             <div class="chips">${demoBadge(c.user_id)} ${verifiedBadge(c.phone_verified)}</div></div>
         </div>
         <p class="answer">${esc(c.about)}</p>
+        ${skillTags(c.skills, c.skills_common)}
+        ${skillMatchNote(c.skills_common)}
         ${renderAi(c.ai)}
         ${isDemoId(c.user_id) && !c.invited ? `<p class="muted demo-note">Демо-кандидат: на приглашение он откликнется автоматически через несколько секунд.</p>` : ""}
         <div class="actions">
@@ -1897,6 +2087,7 @@ async function loadProfile() {
     form.elements.goal.value = p.goal || "";
     form.elements.category.value = p.category || "Любая";
     form.elements.about.value = p.about || "";
+    setSkills($("profile-skills-field").querySelector("[data-skill-picker]"), p.skills || []);
     form.elements.visible.checked = p.visible;
     form.elements.consent.checked = Boolean(p.consent);
     syncGoalFields();
@@ -1968,6 +2159,7 @@ function syncGoalFields() {
   const own = $("profile-form").elements.goal.value === "own";
   $("about-required").hidden = own;
   $("visible-field").hidden = own;
+  $("profile-skills-field").hidden = own;
 }
 
 // Контакты нужны только для MATCH, поэтому профиль спрашиваем не на входе, а в момент,
@@ -1986,6 +2178,8 @@ function setupProfileForm() {
   const form = $("profile-form");
   setupPhoneMask(form.elements.phone);
   form.elements.goal.addEventListener("change", syncGoalFields);
+  $("profile-skills-field").insertAdjacentHTML("beforeend", skillPickerHtml("Свой тег, например Excel"));
+  setupSkillPicker($("profile-skills-field").querySelector("[data-skill-picker]"));
   // Шапка ведёт в профиль. Если он уже открыт — не перезагружаем, чтобы не стереть введённое.
   const openProfile = () => {
     if ($("view-profile").hidden) show("profile");
@@ -2067,6 +2261,7 @@ function setupProfileForm() {
           goal: f.goal.value,
           category: f.category.value,
           about: f.about.value.trim(),
+          skills: pickerValue($("profile-skills-field").querySelector("[data-skill-picker]")),
           ...(manual ? { max_link: maxLink } : {}),
           visible: f.goal.value !== "own" && f.visible.checked,
           consent: true,
@@ -2144,7 +2339,7 @@ function setupSearchForm() {
       }
       results.innerHTML =
         aiNotice(ai, "Заполните профиль, и ИИ объяснит, насколько вы подходите каждому проекту.") +
-        matches.map(({ startup, ai: aiItem }) => projectForCandidate(startup, aiItem)).join("");
+        matches.map(({ startup, ai: aiItem, skills_common }) => projectForCandidate(startup, aiItem, skills_common)).join("");
     } catch (error) {
       failed(results, error, () => form.requestSubmit());
     }
@@ -2162,7 +2357,7 @@ const MY_OFFER_NOTE = {
 };
 const myOfferNote = (status) => `<p class="my-offer-note" data-my-offer="${esc(status)}">${MY_OFFER_NOTE[status] || MY_OFFER_NOTE.new}</p>`;
 
-function projectForCandidate(s, ai) {
+function projectForCandidate(s, ai, skillsCommon = []) {
   const isOwn = state.user && Number(s.founder_id) === state.user.user_id;
   const rows = [
     ["Клиент", s.customer], ["Проблема", s.problem], ["Решение", s.solution],
@@ -2180,6 +2375,8 @@ function projectForCandidate(s, ai) {
     <p class="muted">Ищет: ${esc(seekingText(s))}</p>
     ${s.founder_verified ? `<div class="chips">${verifiedBadge(true, "✓ Основатель подтвердил телефон")}</div>` : ""}
     ${rows.map(([k, v]) => `<p class="answer"><b>${k}.</b> ${esc(v)}</p>`).join("")}
+    ${skillTags(s.skills, skillsCommon)}
+    ${skillMatchNote(skillsCommon, "Совпадений с вашими навыками")}
     ${linkChips(s.links)}
     ${renderAi(ai, "Почему вы подходите")}
     ${isOwn

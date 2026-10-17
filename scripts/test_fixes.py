@@ -184,4 +184,44 @@ s, made = call("POST", "/api/startups", SOLO, {
     "links": [{"kind": "landing", "url": "https://example.com"}]})
 check("ссылки можно передать сразу при создании", s == 201 and made.get("links") == [{"kind": "landing", "url": "https://example.com/"}], (s, made))
 
+# ---------- 7. Теги навыков (отзыв тестировщика) ----------
+SK_F, SK_A, SK_B = 800000000000 + RUN * 10 + 6, 800000000000 + RUN * 10 + 7, 800000000000 + RUN * 10 + 8
+profile(SK_F, "own", "", False)
+profile(SK_A, "team", "Дизайнер интерфейсов, делаю прототипы", True)
+s, pa = call("PUT", "/api/profile", SK_A, {
+    "last_name": "Тестов", "first_name": "А", "email": "a@example.com", "phone": "+79000000006", "goal": "team",
+    "about": "Дизайнер интерфейсов, делаю прототипы", "visible": True, "consent": True, "category": "Любая",
+    "skills": ["#UX/UI", "Figma", "FIGMA"]})
+check("теги профиля: # снят, дубль убран", s == 200 and pa.get("skills") == ["UX/UI", "Figma"], (s, pa))
+s, pa = call("PUT", "/api/profile", SK_A, {
+    "last_name": "Тестов", "first_name": "А", "email": "a@example.com", "phone": "+79000000006", "goal": "team",
+    "about": "Дизайнер интерфейсов, делаю прототипы", "visible": True, "consent": True, "category": "Любая"})
+check("профиль без skills — теги не стираются", pa.get("skills") == ["UX/UI", "Figma"], pa)
+for bad in [["<b>"], [f"t{i}" for i in range(11)], "Python", ["x" * 31]]:
+    s, err = call("PUT", "/api/profile", SK_A, {**{"last_name": "Т", "first_name": "А", "email": "a@example.com",
+        "phone": "+79000000006", "goal": "team", "about": "Дизайнер", "consent": True}, "skills": bad})
+    check(f"плохие теги отклонены: {str(bad)[:30]}", s == 400, (s, err))
+s, pb = call("PUT", "/api/profile", SK_B, {
+    "last_name": "Тестов", "first_name": "Б", "email": "b@example.com", "phone": "+79000000007", "goal": "team",
+    "about": "Пишу бэкенд на Python", "visible": True, "consent": True, "category": "Любая", "skills": ["python", "b2b-продажи"]})
+s, sk = call("POST", "/api/startups", SK_F, {
+    "name": "Проект с тегами", "category": "Образование", "market_type": "B2C", "stage": "Идея",
+    "seeking": "Команда / co-founder", "customer": "Студенты", "problem": "Дорогие учебники",
+    "solution": "Обмен внутри вуза", "partner_needed": "Backend-разработчик", "skills": ["Python", "B2B_продажи"]})
+check("проект создан с тегами", s == 201 and sk.get("skills") == ["Python", "B2B_продажи"], (s, sk))
+s, sk2 = call("PATCH", f"/api/startups/{sk['id']}", SK_F, {"skills": ["Python", "B2B_продажи", "Figma"]})
+check("PATCH skills не пересчитывает карту", s == 200 and sk2.get("skills")[-1] == "Figma" and sk2.get("idea_map") == sk.get("idea_map"), (s, sk2))
+call("PUT", "/api/profile", SK_F, {"last_name": "Т", "first_name": "Ф", "email": "f@example.com", "phone": "+79000000005",
+     "goal": "own", "about": "", "visible": False, "consent": True, "category": "Любая"})
+s, _ = call("POST", f"/api/startups/{sk['id']}/publish", SK_F, {})
+s, cands = call("GET", f"/api/startups/{sk['id']}/candidates", SK_F)
+by = {c["user_id"]: c for c in (cands or {}).get("candidates", [])}
+check("совпадения тегов без учёта регистра и -/_", by.get(SK_B, {}).get("skills_common") == ["Python", "B2B_продажи"], by.get(SK_B))
+check("у дизайнера совпадает Figma", by.get(SK_A, {}).get("skills_common") == ["Figma"], by.get(SK_A))
+order = [c["user_id"] for c in cands.get("candidates", [])]
+check("больше совпадений — выше в списке", SK_A in order and SK_B in order and order.index(SK_B) < order.index(SK_A), order)
+s, found = call("POST", "/api/search", SK_B, {"goal": "team", "category": "Образование", "min_stage": "Идея"})
+mine = [m for m in found.get("matches", []) if m["startup"]["id"] == sk["id"]]
+check("поиск отдаёт skills_common", mine and mine[0].get("skills_common") == ["Python", "B2B_продажи"], mine)
+
 print(f"\nИтого: {ok_count} OK, {fail_count} FAIL")
