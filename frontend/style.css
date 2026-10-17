@@ -648,7 +648,20 @@ img { -webkit-user-drag: none; }                          /* картинки н
 .wizard-on #idea-questions .field > span { font-size: 18px; line-height: 1.3; }   /* вопрос — крупно, как в диалоге */
 .wizard-on #idea-questions .textarea { min-height: 140px; }
 
-.wizard-nav { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
-.wizard-nav #wizard-next { margin-left: auto; }
+.wizard-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 4px; }
+.wizard-nav .btn { white-space: nowrap; }
+.wizard-nav #wizard-next { margin-left: auto; min-width: 0; }
+/* Узкий экран (MAX на ПК, iPhone SE): главная кнопка — на всю ширину отдельной строкой */
+@media (max-width: 420px) {
+  .wizard-nav #wizard-next { order: -1; flex: 1 0 100%; margin-left: 0; }
+  .wizard-nav #wizard-skip { margin-left: auto; }
+}
 .wizard-nav .text-btn { color: var(--muted); }
 .wizard-on #idea-form .step-head { display: none; }  /* нумерация карточек спорит с «Шаг N из M» */
+
+/* Очень узкий экран (iPhone SE, 320px): кнопка «Заполнить профиль» не выталкивается за край */
+@media (max-width: 360px) {
+  .topbar { gap: 8px; padding: 0 12px; }
+  .brand { font-size: 17px; gap: 6px; }
+  .profile-cta { padding: 8px 10px; font-size: 12px; }
+}

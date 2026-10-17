@@ -748,7 +748,7 @@ function renderWizard(focus = false) {
   $("wizard-bar").style.width = `${Math.round(((wizard.i + 1) / steps.length) * 100)}%`;
   $("wizard-back").hidden = wizard.i === 0;
   $("wizard-skip").hidden = !step.optional;
-  $("wizard-next").textContent = last ? "Сформировать карту проекта →" : step.next || "Дальше →";
+  $("wizard-next").textContent = last ? "Построить карту проекта →" : step.next || "Дальше →";
 
   if (focus) {
     const target = step.id === "quick"
