@@ -707,3 +707,5 @@ img { -webkit-user-drag: none; }                          /* картинки н
 .skill-add .btn { white-space: nowrap; }
 .skill-edit { display: grid; gap: 10px; margin-top: 10px; }
 .skill-more { font-size: 13px; padding: 6px 4px; }
+.change-intent { margin: 10px 0 2px; }
+.change-intent .text-btn { font-size: 14px; }

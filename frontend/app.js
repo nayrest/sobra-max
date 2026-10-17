@@ -2653,6 +2653,11 @@ function setupStart() {
     })
   );
   $("start-skip").addEventListener("click", () => show("projects"));
+  // «Передумать можно в любой момент»: тот же экран выбора из вкладки «Проекты»
+  $("change-intent").addEventListener("click", () => {
+    $("start-skip").textContent = "← Вернуться к проектам";
+    show("start");
+  });
 }
 
 function isProfileComplete(profile) {
