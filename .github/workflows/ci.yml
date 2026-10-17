@@ -26,10 +26,10 @@ permissions:
 jobs:
   test:
     name: Автотесты
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Синтаксис JavaScript
         run: for f in backend/*.js frontend/app.js; do node --check "$f"; done
