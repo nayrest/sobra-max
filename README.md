@@ -32,8 +32,9 @@ SOBRA не оценивает, хорошая ли идея. Она показы
 14. [Ожидаемое поведение](#ожидаемое-поведение)
 15. [Остановка и повторный запуск](#остановка-и-повторный-запуск)
 16. [Развёртывание на сервере](#развёртывание-на-сервере)
-17. [Доработки после пилота](#доработки-после-пилота-октябрь-2026)
-18. [Известные ограничения](#известные-ограничения)
+17. [CI/CD и бэкапы](#cicd-и-бэкапы)
+18. [Доработки после пилота](#доработки-после-пилота-октябрь-2026)
+19. [Известные ограничения](#известные-ограничения)
 
 ---
 
@@ -309,6 +310,7 @@ docker push nayrest/sobra-backend:latest
 | `YANDEX_API_KEY` | да, для ИИ-функций | API-ключ сервисного аккаунта Yandex Cloud с ролью `ai.languageModels.user`. Нужен для Idea Check, методики задач и AI Match. Без него приложение запускается в запасном режиме: карта по правилам, подбор без оценки ИИ |
 | `YANDEX_FOLDER_ID` | да, для ИИ-функций | id каталога Yandex Cloud, в котором создан сервисный аккаунт |
 | `API_DEBUG_AUTH` | нет | `true` — вход по `?debug_user=N` без MAX. Только для локальной отладки, по умолчанию `false` |
+| `BOT_DISABLED` | нет | `true` — не запускать бота (автотесты в CI, где токен ненастоящий). На сервере не задавать |
 | `API_TEST_TOKEN_FOUNDER` | нет | Токен тестового основателя для автоматической проверки, не короче 24 символов (генерация — в разделе запуска) |
 | `API_TEST_TOKEN_CANDIDATE` | нет | Токен тестового кандидата |
 
@@ -542,7 +544,7 @@ docker compose --profile local down -v     # остановить и УДАЛИ�
 4. `docker compose up -d --build`, затем загрузить `demo-data.sql` и `test-data.sql`.
 5. В настройках бота на платформе MAX указать адрес мини-приложения `https://<ip-с-дефисами>.nip.io/`.
 
-Обновление:
+Обновление (вручную; автоматически — см. [CI/CD и бэкапы](#cicd-и-бэкапы)):
 
 ```bash
 cd /var/www/sobra
@@ -552,6 +554,26 @@ python3 scripts/check_api.py DATA-API.yaml --env .env
 ```
 
 ---
+
+## CI/CD и бэкапы
+
+Файл `.github/workflows/ci.yml`, скрипты `scripts/deploy.sh` и `scripts/backup.sh`.
+
+- **Автотесты на каждый push и pull request.** GitHub Actions поднимает проект в Docker так же, как на сервере (бот выключен `BOT_DISABLED=true`, ИИ без ключа), загружает `test-data.sql` и прогоняет проверку жюри `scripts/check_api.py` и регрессионные тесты `scripts/test_fixes.py`.
+- **Автодеплой** — только из `main`, только после зелёных тестов и только если переменная репозитория `DEPLOY_ENABLED = true` (так деплой ставится на паузу, например на время финала). Сервер делает бэкап базы, обновляет код, пересобирает контейнер и ждёт `/api/health`. Если API не поднялся за минуту — откатывается на прежнюю версию.
+- **Ключ деплоя ограничен.** В `authorized_keys` он привязан к одной команде (`deploy.sh`) без shell, проброса портов и pty: даже утёкший ключ умеет только выкатить коммит, который уже есть в `main`.
+- **Бэкапы:** `backup.sh` по cron раз в сутки и перед каждым деплоем, сжатые, с проверкой, что дамп полный; хранятся последние 7 копий каждого вида в `~/backups` (доступ только у владельца).
+
+Настройка (один раз):
+
+1. Ключ деплоя (на своём компьютере): `ssh-keygen -t ed25519 -f sobra_deploy -N "" -C github-deploy`.
+2. На сервере в `~/.ssh/authorized_keys` добавить строку:
+   `command="bash /var/www/sobra/scripts/deploy.sh",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty <содержимое sobra_deploy.pub>`
+3. GitHub → Settings → Secrets and variables → Actions.
+   Secrets: `DEPLOY_SSH_KEY` (содержимое `sobra_deploy`), `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_KNOWN_HOSTS` (вывод `ssh-keyscan -t ed25519 <IP сервера>`).
+   Variables: `DEPLOY_ENABLED` = `true`, `PUBLIC_URL` = `https://<ip-с-дефисами>.nip.io`.
+4. Cron на сервере (`crontab -e`): `15 3 * * * bash /var/www/sobra/scripts/backup.sh >> $HOME/backups/backup.log 2>&1`
+5. Проверка: GitHub → Actions → CI/CD → Run workflow.
 
 ## Доработки после пилота (октябрь 2026)
 

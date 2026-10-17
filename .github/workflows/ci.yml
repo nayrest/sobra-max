@@ -1,0 +1,112 @@
+# CI/CD SOBRA
+#
+# test   — на каждый push и pull request: проект поднимается в Docker, как на сервере,
+#          и прогоняются проверка жюри (DATA-API.yaml) и регрессионные тесты.
+# deploy — push в main или ручной запуск (Run workflow), только после зелёных тестов и только если в настройках
+#          репозитория переменная DEPLOY_ENABLED = true (так автодеплой ставится на паузу).
+#          Сервер сам делает бэкап базы, обновляется и откатывается, если API не поднялся.
+#
+# Секреты (Settings → Secrets and variables → Actions):
+#   DEPLOY_SSH_KEY      — приватный ключ деплоя (отдельный, не личный)
+#   DEPLOY_KNOWN_HOSTS  — вывод ssh-keyscan сервера
+#   DEPLOY_HOST, DEPLOY_USER — адрес сервера и пользователь деплоя
+# Переменные: DEPLOY_ENABLED (true/false), PUBLIC_URL (https://…/ без /api)
+
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Автотесты
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Синтаксис JavaScript
+        run: for f in backend/*.js frontend/app.js; do node --check "$f"; done
+
+      - name: Настройки для автотестов
+        # Ненастоящие значения: бот не запускается, ИИ выключен, вход по X-Debug-User-Id разрешён только здесь
+        run: |
+          cat > .env <<'EOF'
+          BOT_TOKEN=ci-fake-token
+          BOT_DISABLED=true
+          API_DEBUG_AUTH=true
+          POSTGRES_DB=sobra
+          POSTGRES_USER=sobra
+          POSTGRES_PASSWORD=ci-password
+          API_TEST_TOKEN_FOUNDER=ci-founder-token-0000000000
+          API_TEST_TOKEN_CANDIDATE=ci-candidate-token-000000000
+          API_BASE_URL=http://localhost:3000/api
+          EOF
+
+      - name: Запуск в Docker
+        run: docker compose up -d --build
+
+      - name: Ожидание API
+        run: |
+          for i in $(seq 1 60); do
+            curl -fsS http://localhost:3000/api/health && exit 0
+            sleep 2
+          done
+          echo "API не поднялся за 2 минуты"; exit 1
+
+      - name: Тестовые учётные записи
+        run: docker compose exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -q -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < test-data.sql
+
+      - name: Проверка жюри (DATA-API.yaml)
+        run: |
+          pip install --quiet pyyaml
+          python3 scripts/check_api.py DATA-API.yaml --base-url http://localhost:3000/api --env .env
+
+      - name: Регрессионные тесты доработок
+        run: python3 scripts/test_fixes.py --base-url http://localhost:3000
+
+      - name: Логи контейнеров при ошибке
+        if: failure()
+        run: docker compose logs --tail=200
+
+  deploy:
+    name: Деплой на сервер
+    needs: test
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    steps:
+      - name: Ключ и отпечаток сервера
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Деплой (бэкап → обновление → проверка → откат при сбое)
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        # На сервере ключ привязан к одной команде (deploy.sh), поэтому передаём только хэш коммита
+        run: ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" "$GITHUB_SHA"
+
+      - name: Проверка снаружи, по HTTPS
+        env:
+          PUBLIC_URL: ${{ vars.PUBLIC_URL }}
+        run: curl -fsS --retry 5 --retry-delay 3 "${PUBLIC_URL%/}/api/health"
+
+      - name: Удаление ключа
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

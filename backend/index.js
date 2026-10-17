@@ -198,6 +198,12 @@ async function main() {
     console.log(`🌐 API для мини-приложения слушает порт ${API_PORT}`);
   });
 
+  // В CI бот не нужен (токен ненастоящий) — проверяется только API
+  if (process.env.BOT_DISABLED === "true") {
+    console.log("⏸  BOT_DISABLED=true — бот не запускается (режим автотестов)");
+    return;
+  }
+
   console.log("🚀 Бот SOBRA запускается");
   await bot.start();
 }
