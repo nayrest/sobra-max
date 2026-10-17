@@ -1,0 +1,39 @@
+# Dependabot: раз в неделю проверяет зависимости и открывает pull request с обновлением.
+# Каждый такой PR проходит автотесты CI (job test), на сервер он попадает только после слияния в main.
+# До финала (29.10) PR с обновлениями не сливаем — заморозка кода. Исключение — исправления уязвимостей,
+# и то только после зелёных тестов.
+
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Moscow
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor:
+        update-types: [minor, patch] # мелкие обновления — одним PR, а не пачкой
+    commit-message:
+      prefix: "deps"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Moscow
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "ci"
+
+  - package-ecosystem: docker
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Moscow
+    open-pull-requests-limit: 1
+    commit-message:
+      prefix: "docker"

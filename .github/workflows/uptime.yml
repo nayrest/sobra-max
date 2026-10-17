@@ -1,0 +1,71 @@
+# Проверка доступности SOBRA снаружи — каждые 15 минут.
+#
+# Если сервер не ответил, прогон падает, и GitHub присылает письмо об упавшем workflow
+# (тому, кто последним менял строку cron в этом файле; включено в Settings → Notifications → Actions).
+# Нужна только публичная ссылка: ни ключей, ни доступа к серверу у этой проверки нет.
+#
+# Что проверяется:
+#   1. /api/health — API живой и достучался до базы (внутри SELECT 1);
+#   2. главная страница мини-приложения отдаётся через nginx;
+#   3. HTTPS-сертификат действует ещё не меньше 14 дней (иначе — не продлился certbot).
+#
+# Переменные (Settings → Secrets and variables → Actions → Variables):
+#   PUBLIC_URL      — https://…/ без /api (та же, что для деплоя)
+#   UPTIME_ENABLED  — false, чтобы поставить проверку на паузу (по умолчанию работает)
+#
+# Ограничения GitHub: запуск по расписанию может опаздывать на 5–15 минут, идёт только из ветки main,
+# а если в публичном репозитории 60 дней нет коммитов, расписание отключается само.
+
+name: Uptime
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uptime
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Сервер отвечает
+    if: vars.UPTIME_ENABLED != 'false' && vars.PUBLIC_URL != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      PUBLIC_URL: ${{ vars.PUBLIC_URL }}
+    steps:
+      - name: API и база данных (/api/health)
+        # Три попытки с паузой: один сетевой сбой — ещё не авария
+        run: |
+          url="${PUBLIC_URL%/}/api/health"
+          for i in 1 2 3; do
+            if body=$(curl -fsS --max-time 15 "$url") && echo "$body" | grep -q '"status":"ok"'; then
+              echo "OK: $body"; exit 0
+            fi
+            echo "Попытка $i из 3 не удалась"; sleep 20
+          done
+          echo "::error::API не отвечает: $url"; exit 1
+
+      - name: Мини-приложение открывается
+        run: |
+          if curl -fsS --max-time 15 --retry 2 --retry-delay 10 "${PUBLIC_URL%/}/" | grep -q "<title>SOBRA"; then
+            echo "OK: главная страница отдаётся"
+          else
+            echo "::error::Главная страница мини-приложения не отдаётся"; exit 1
+          fi
+
+      - name: HTTPS-сертификат
+        run: |
+          host=$(printf '%s' "$PUBLIC_URL" | sed -E 's#^https?://([^/:]+).*#\1#')
+          end=$(echo | openssl s_client -connect "$host:443" -servername "$host" 2>/dev/null | openssl x509 -noout -enddate | cut -d= -f2)
+          if [ -z "$end" ]; then echo "::error::Не удалось получить сертификат $host"; exit 1; fi
+          days=$(( ( $(date -d "$end" +%s) - $(date +%s) ) / 86400 ))
+          echo "Сертификат $host действует до $end — осталось $days дн."
+          if [ "$days" -lt 14 ]; then
+            echo "::error::Сертификат истекает через $days дн. Проверьте на сервере: sudo certbot renew"; exit 1
+          fi

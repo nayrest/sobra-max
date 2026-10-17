@@ -1,0 +1,52 @@
+# Релиз по тегу: git tag -a v1.0-final -m "Версия для финала" && git push origin v1.0-final
+#
+# Создаёт страницу в Releases: какой коммит выпущен, что изменилось с прошлого тега
+# (список коммитов) и архив исходников. Так видно, какую именно версию показывали жюри.
+# На сервер ничего не выкатывает — деплой по-прежнему только из main через CI/CD.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # создать Release; больше ничего не нужно
+
+jobs:
+  release:
+    name: Страница релиза
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # нужна история, чтобы собрать список изменений
+
+      - name: Теги целиком
+        # checkout на теге может заменить аннотированный тег лёгким — вернём оригинал с сообщением
+        run: git fetch --force --tags origin
+
+      - name: Список изменений
+        run: |
+          tag="$GITHUB_REF_NAME"
+          prev=$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || true)
+          {
+            echo "Коммит: \`$(git rev-parse HEAD)\`"
+            echo
+            if [ -n "$prev" ]; then
+              echo "## Изменения с $prev"
+              git log --no-merges --format='- %s' "$prev..$tag"
+            else
+              echo "## Последние изменения"
+              git log --no-merges --format='- %s' -n 30 "$tag"
+            fi
+          } > notes.md
+          cat notes.md
+
+      - name: Создать Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title=$(git tag -l --format='%(contents:subject)' "$GITHUB_REF_NAME")
+          gh release create "$GITHUB_REF_NAME" --title "${title:-$GITHUB_REF_NAME}" --notes-file notes.md --verify-tag
