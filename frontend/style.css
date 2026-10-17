@@ -406,7 +406,7 @@ h2.section { margin: 22px 0 10px; }
 
 /* ---------- Action Plan ---------- */
 
-.plan { margin-top: 12px; }
+.plan, .map-grid + .card { margin-top: 12px; }  /* отступ от сетки блоков карты — у любой карточки после неё */
 .plan-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .plan-head h2 { margin: 0; }
 .plan-count {
@@ -662,8 +662,9 @@ img { -webkit-user-drag: none; }                          /* картинки н
 /* Очень узкий экран (iPhone SE, 320px): кнопка «Заполнить профиль» не выталкивается за край */
 @media (max-width: 360px) {
   .topbar { gap: 8px; padding: 0 12px; }
-  .brand { font-size: 17px; gap: 6px; }
-  .profile-cta { padding: 8px 10px; font-size: 12px; }
+  .brand { font-size: 15px; gap: 6px; white-space: nowrap; }
+  .brand-logo { width: 26px; height: 26px; }
+  .topbar .profile-cta { padding: 8px 10px; font-size: 12px; }
 }
 
 /* ---------- Материалы проекта: ссылки ---------- */
@@ -679,3 +680,6 @@ img { -webkit-user-drag: none; }                          /* картинки н
 .link-host { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .danger-text { color: #d23b3b; }
 .link-form { display: grid; gap: 10px; margin-top: 12px; }
+@media (max-width: 340px) {
+  .topbar .profile-cta { padding: 7px 8px; font-size: 11px; }
+}
