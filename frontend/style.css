@@ -578,3 +578,19 @@ button, .tabbar, .journey, .badge, .tab-badge, .brand, .btn, .text-btn, .contact
   -webkit-user-select: none; user-select: none;           /* кнопки не выделяются как текст */
 }
 img { -webkit-user-drag: none; }                          /* картинки не перетаскиваются */
+
+/* Отклик уже отправлен — вместо кнопки статус (17.10.2026) */
+.my-offer-note {
+  margin: 10px 0 0; padding: 10px 12px; border-radius: 12px;
+  background: #eef3ff; color: var(--blue); font-weight: 700; font-size: 14px; text-align: center;
+}
+.my-offer-note[data-my-offer="accepted"] { background: var(--green-bg); color: var(--green); }
+.my-offer-note[data-my-offer="rejected"] { background: #f2f4f8; color: var(--muted); font-weight: 600; }
+
+/* Бот не может писать пользователю: не нажата «Начать» */
+.bot-banner {
+  margin: 0 0 12px; padding: 12px 14px; border-radius: 14px;
+  border: 1px solid #f1ddb0; background: #fffaf0; font-size: 14px;
+}
+.bot-banner b { display: block; margin-bottom: 4px; }
+.bot-banner p { margin: 0; color: #5d4a1f; }

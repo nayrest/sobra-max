@@ -363,15 +363,29 @@ function createApi({ notify = {} } = {}) {
   app.use(express.json({ limit: "300kb" }));
 
   // Уведомления не должны ронять запрос: данные уже сохранены в БД
+  // Кому адресовано уведомление — чтобы запомнить, дошло ли оно
+  const recipientOf = (fn, args) => {
+    if (fn === notify.newOffer) return args[0]?.founder_id;
+    if (fn === notify.invite) return args[1];
+    if (fn === notify.offerAccepted || fn === notify.offerRejected) return args[0]?.sender_id;
+    return null;
+  };
+
   const safeNotify = async (fn, ...args) => {
     if (typeof fn !== "function") return;
+    const recipient = Number(recipientOf(fn, args)) || null;
     try {
       await fn(...args);
+      if (recipient) await db.markBotStarted(recipient).catch(() => {});
     } catch (error) {
       if (/dialog not found/i.test(error.message)) {
-        // MAX разрешает писать только тем, кто сам запускал бота.
-        // Так бывает с демо-основателями и отладочными пользователями.
+        // MAX разрешает писать только тем, кто сам нажал «Начать» в чате с ботом.
+        // Запоминаем это: в приложении человек увидит подсказку и счётчик ожидающих откликов.
         console.warn("ℹ️  Уведомление не отправлено: получатель ещё не запускал бота в MAX");
+        if (recipient && !db.isDemoUser(recipient)) {
+          await db.markBotUnreachable(recipient).catch(() => {});
+          publishEvent(recipient);
+        }
       } else {
         console.error("❌ Ошибка уведомления через бота:", error.message);
       }
@@ -654,7 +668,8 @@ function createApi({ notify = {} } = {}) {
   app.get("/api/startups/public/:id", wrap(async (req, res) => {
     const startup = await db.getPublishedStartupById(parseId(req.params.id));
     if (!startup) throw new ApiError(404, "Проект не найден или не опубликован");
-    res.json(startup);
+    const myOffers = await db.getMyOfferStatuses(req.user.userId);
+    res.json({ ...startup, my_offer: myOffers[Number(startup.id)] || null });
   }));
 
   async function getOwnStartup(req) {
@@ -773,7 +788,13 @@ function createApi({ notify = {} } = {}) {
     const found = await db.findMatches(criteria, req.user.userId);
 
     // ИИ оценивает только то, что прошло фильтры. При сбое ИИ поиск всё равно отвечает.
-    const { matches, ai } = await aiMatching.enrichMatches(about, criteria, found);
+    const enriched = await aiMatching.enrichMatches(about, criteria, found);
+    const ai = enriched.ai;
+    // Уже откликался — вместо кнопки «Откликнуться» покажем статус отклика
+    const myOffers = await db.getMyOfferStatuses(req.user.userId);
+    const matches = enriched.matches.map((m) =>
+      m.startup ? { ...m, startup: { ...m.startup, my_offer: myOffers[Number(m.startup.id)] || null } } : m
+    );
     await logAiMatches(
       matches
         .filter((m) => m.ai && Number.isFinite(m.ai.score))
@@ -1084,6 +1105,7 @@ function createApi({ notify = {} } = {}) {
       OFFER_TYPES[typeKey],
       message
     );
+    if (!offer) throw new ApiError(409, "Вы уже откликались на этот проект. Ответ основателя придёт в чат с ботом.", "already_applied");
 
     publishEvent(startup.founder_id);
     if (db.isDemoUser(startup.founder_id)) scheduleDemoReply();
@@ -1128,6 +1150,51 @@ function createApi({ notify = {} } = {}) {
 
   app.get("/api/events/ticket", wrap(async (req, res) => {
     res.json({ ticket: createEventTicket(req.user.userId, botToken), expires_in: EVENT_TICKET_TTL_SECONDS });
+  }));
+
+  // ---------- черновики незаконченных форм ----------
+  // Ключ — вид формы и номер: idea-draft, task-draft:15. Только свои черновики пользователя.
+  const DRAFT_KEY_RE = /^[a-z][a-z0-9-]{0,30}(:[0-9]{1,10})?$/;
+  const DRAFT_MAX_BYTES = 40 * 1024;
+  const DRAFT_MAX_PER_USER = 50;
+
+  const draftKeyParam = (req) => {
+    const key = String(req.params.key || "");
+    if (!DRAFT_KEY_RE.test(key)) throw new ApiError(400, "Некорректный ключ черновика");
+    return key;
+  };
+
+  app.get("/api/drafts/:key", wrap(async (req, res) => {
+    const draft = await db.getDraft(req.user.userId, draftKeyParam(req));
+    if (!draft) return res.status(404).json({ error: "Черновика нет" });
+    res.json({ data: draft.data, updated_at: draft.updated_at });
+  }));
+
+  app.put("/api/drafts/:key", wrap(async (req, res) => {
+    const key = draftKeyParam(req);
+    const data = req.body?.data;
+    if (!data || typeof data !== "object" || Array.isArray(data)) throw new ApiError(400, "Поле data должно быть объектом");
+    // Только строковые поля: черновик — это текст из формы
+    const clean = {};
+    for (const [name, value] of Object.entries(data)) {
+      if (typeof value === "string" && /^[a-z_]{1,40}$/.test(name)) clean[name] = value;
+    }
+    if (Buffer.byteLength(JSON.stringify(clean)) > DRAFT_MAX_BYTES) throw new ApiError(413, "Черновик слишком большой");
+    const hasText = Object.values(clean).some((v) => v.trim());
+    if (!hasText) {
+      await db.deleteDraft(req.user.userId, key);
+      return res.status(204).end();
+    }
+    if (!(await db.getDraft(req.user.userId, key)) && (await db.countDrafts(req.user.userId)) >= DRAFT_MAX_PER_USER) {
+      throw new ApiError(429, "Слишком много черновиков");
+    }
+    await db.saveDraft(req.user.userId, key, clean);
+    res.status(204).end();
+  }));
+
+  app.delete("/api/drafts/:key", wrap(async (req, res) => {
+    await db.deleteDraft(req.user.userId, draftKeyParam(req));
+    res.status(204).end();
   }));
 
   app.get("/api/counters", wrap(async (req, res) => {

@@ -238,3 +238,23 @@ UPDATE search_profiles SET category = CASE category
   WHEN 'EdTech' THEN 'Образование'
   WHEN 'E-commerce' THEN 'Магазин / E-commerce'
 END WHERE category IN ('AI', 'SaaS', 'FoodTech', 'FinTech', 'EdTech', 'E-commerce');
+
+-- ======================================================
+-- Доработки после пилота (17.10.2026)
+-- ======================================================
+
+-- Черновики незаконченных форм. В webview MAX localStorage сохраняется не всегда,
+-- и ответы терялись, поэтому черновик дублируется на сервере. Старше 30 дней — удаляется.
+CREATE TABLE IF NOT EXISTS drafts (
+  user_id     BIGINT NOT NULL,
+  key         TEXT NOT NULL,
+  data        JSONB NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, key)
+);
+
+-- MAX разрешает боту писать только тем, кто нажал «Начать».
+-- bot_started_at — человек писал боту или нажимал «Начать»;
+-- bot_unreachable_at — уведомление не дошло, в приложении показываем подсказку.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS bot_started_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS bot_unreachable_at TIMESTAMPTZ;

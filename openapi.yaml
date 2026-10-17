@@ -590,6 +590,7 @@ paths:
     get:
       tags: [Подбор]
       summary: Приглашения, которые я получил
+      description: Только те, на которые я ещё не откликался. После отклика или MATCH проект из списка уходит.
       operationId: listInvites
       responses:
         "200":
@@ -658,7 +659,9 @@ paths:
     post:
       tags: [Отклики и MATCH]
       summary: Откликнуться на проект
-      description: Основатель получает уведомление от бота в MAX. Имя отправителя берётся из проверенной авторизации.
+      description: |
+        Основатель получает уведомление от бота в MAX. Имя отправителя берётся из проверенной авторизации.
+        На один проект человек откликается один раз: повторный отклик вернёт 409 с кодом already_applied.
       operationId: createOffer
       requestBody:
         required: true
@@ -680,7 +683,16 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "409": { $ref: "#/components/responses/ProfileRequired" }
+        "409":
+          description: Профиль не заполнен (code = profile_required) или отклик на этот проект уже отправлен (code = already_applied)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Error" }
+                  - type: object
+                    properties:
+                      code: { type: string, enum: [profile_required, already_applied] }
         "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /offers/received:
@@ -788,6 +800,63 @@ paths:
               schema: { type: string, example: "event: counters\ndata: {}\n\n" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /drafts/{key}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        description: Вид формы и номер, например idea-draft или task-draft:15
+        schema: { type: string, pattern: "^[a-z][a-z0-9-]{0,30}(:[0-9]{1,10})?$" }
+    get:
+      tags: [Проекты]
+      summary: Черновик незаконченной формы
+      description: |
+        Черновик хранится и на устройстве, и на сервере: в webview MAX localStorage сохраняется не всегда.
+        Черновики старше 30 дней не возвращаются и удаляются.
+      operationId: getDraft
+      responses:
+        "200":
+          description: Черновик
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, updated_at]
+                properties:
+                  data: { type: object, additionalProperties: { type: string } }
+                  updated_at: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Проекты]
+      summary: Сохранить черновик
+      description: Только строковые поля, до 40 КБ, до 50 черновиков на пользователя. Пустой черновик удаляется.
+      operationId: saveDraft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [data]
+              properties:
+                data: { type: object, additionalProperties: { type: string } }
+      responses:
+        "204": { description: Сохранено }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "413": { description: Черновик слишком большой }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+    delete:
+      tags: [Проекты]
+      summary: Удалить черновик
+      operationId: deleteDraft
+      responses:
+        "204": { description: Удалено }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
   /counters:
     get:
       tags: [Отклики и MATCH]
@@ -796,6 +865,9 @@ paths:
         responses — новые отклики на мои проекты (ещё без решения) и новые приглашения мне;
         contacts — новые MATCH, где основатель принял мой отклик.
         «Новое» — пришло после последнего открытия вкладки (POST /counters/seen).
+        pending — все отклики на мои проекты, по которым я ещё не принял решение.
+        bot_unreachable — бот не смог прислать мне уведомление: в MAX не нажата «Начать».
+        После «Начать» или любого сообщения боту флаг сбрасывается.
       operationId: getCounters
       responses:
         "200":
@@ -804,10 +876,12 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [responses, contacts]
+                required: [responses, contacts, pending, bot_unreachable]
                 properties:
                   responses: { type: integer, minimum: 0 }
                   contacts: { type: integer, minimum: 0 }
+                  pending: { type: integer, minimum: 0 }
+                  bot_unreachable: { type: boolean }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /counters/seen:
@@ -1127,6 +1201,11 @@ components:
       type: object
       required: [id, founder_id, name, category, market_type, stage, seeking, status]
       properties:
+        my_offer:
+          type: string
+          nullable: true
+          enum: [new, accepted, rejected, null]
+          description: Только в поиске и при просмотре чужого проекта — статус моего отклика (null — не откликался)
         id: { type: integer }
         founder_id: { type: integer, format: int64 }
         name: { type: string }

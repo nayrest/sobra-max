@@ -22,14 +22,15 @@ class ApiError extends Error {
   }
 }
 
-async function api(method, path, body) {
+async function api(method, path, body, { keepalive = false } = {}) {
   const headers = { "Content-Type": "application/json" };
   if (initData) headers.Authorization = `Bearer ${initData}`;
   else if (debugUserId) headers["X-Debug-User-Id"] = debugUserId;
 
   let response;
   try {
-    response = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+    // keepalive — запрос дойдёт, даже если пользователь в этот момент закрывает приложение
+    response = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined, keepalive });
   } catch {
     throw new ApiError(0, "Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.");
   }
@@ -325,9 +326,21 @@ async function refreshCounters() {
       if (open && counters[section]) markSeen(section);
       setBadge(section, open ? 0 : counters[section]);
     }
+    renderBotBanner(counters);
   } catch {
     // счётчики не критичны — при ошибке просто не показываем
   }
+}
+
+// Пилот: 6 из 10 откликов ждали ответа — основатели не нажимали «Начать», и бот не мог им написать.
+// Сервер помечает таких людей, когда уведомление не дошло; после «Начать» плашка исчезает сама.
+function renderBotBanner({ bot_unreachable, pending } = {}) {
+  const banner = $("bot-banner");
+  if (!banner) return;
+  banner.hidden = !bot_unreachable;
+  $("bot-banner-pending").textContent = bot_unreachable && pending > 0
+    ? ` Откликов на ваши проекты ждут ответа: ${pending} — они во вкладке «Отклики».`
+    : "";
 }
 
 function markSeen(section) {
@@ -503,45 +516,94 @@ function questionField({ field, q, hint, required }) {
 
 // ======================================================
 // ЧЕРНОВИКИ: введённое не теряется при переходе на другую вкладку или закрытии приложения.
-// Хранятся только на устройстве пользователя (localStorage), на сервер не уходят.
+// Пилот показал: в webview MAX localStorage сохраняется не всегда, и ответы пропадали.
+// Поэтому черновик пишется и на устройство, и на сервер (через секунду после ввода
+// и при сворачивании приложения). При открытии формы берётся более свежий из двух.
 // ======================================================
 
 const IDEA_FORM_FIELDS = ["name", "category", "market_type", "stage", "seeking", ...BLOCKS.map((b) => b.field), PARTNER_QUESTION.field];
 const DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1000; // черновик старше 30 дней не восстанавливаем
 
-const draftKey = (kind, id = "") => `sobra:${kind}:${state.user?.user_id || "anon"}${id ? ":" + id : ""}`;
+// Ключ на сервере: «idea-draft» или «task-draft:15». На устройстве — с номером пользователя.
+const draftKey = (kind, id = "") => `${kind}${id ? ":" + id : ""}`;
+const localDraftKey = (key) => {
+  const [kind, id] = key.split(":");
+  return `sobra:${kind}:${state.user?.user_id || "anon"}${id ? ":" + id : ""}`;
+};
+const draftHasText = (data) => Object.values(data || {}).some((v) => typeof v === "string" && v.trim());
 
-function draftSave(key, data) {
-  try {
-    const hasText = Object.values(data).some((v) => typeof v === "string" && v.trim());
-    if (hasText) localStorage.setItem(key, JSON.stringify({ data, at: Date.now() }));
-    else localStorage.removeItem(key);
-  } catch {
-    // хранилище недоступно (приватный режим и т.п.) — просто работаем без черновика
+const draftQueue = new Map(); // key → данные (null — удалить), ещё не отправленные на сервер
+let draftTimer = null;
+
+function flushDrafts(keepalive = false) {
+  clearTimeout(draftTimer);
+  for (const [key, data] of draftQueue) {
+    draftQueue.delete(key);
+    const path = `/api/drafts/${encodeURIComponent(key)}`;
+    const request = data ? api("PUT", path, { data }, { keepalive }) : api("DELETE", path, null, { keepalive });
+    request.catch(() => {
+      // нет связи — повторим при следующем сохранении, если новых данных ещё не было
+      if (!draftQueue.has(key)) draftQueue.set(key, data);
+    });
   }
 }
 
-function draftLoad(key) {
+// Приложение сворачивают или закрывают — отправляем несохранённое сразу
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") flushDrafts(true);
+});
+window.addEventListener("pagehide", () => flushDrafts(true));
+
+function draftSave(key, data) {
+  const hasText = draftHasText(data);
   try {
-    const raw = JSON.parse(localStorage.getItem(key) || "null");
+    if (hasText) localStorage.setItem(localDraftKey(key), JSON.stringify({ data, at: Date.now() }));
+    else localStorage.removeItem(localDraftKey(key));
+  } catch {
+    // хранилище устройства недоступно — останется копия на сервере
+  }
+  draftQueue.set(key, hasText ? data : null);
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(() => flushDrafts(), 1000);
+}
+
+function draftLoadLocal(key) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(localDraftKey(key)) || "null");
     if (!raw || !raw.data || Date.now() - raw.at > DRAFT_TTL_MS) return null;
-    return raw.data;
+    return raw;
   } catch {
     return null;
   }
 }
 
+// Более свежий из двух черновиков: на устройстве и на сервере
+async function draftLoad(key) {
+  const local = draftLoadLocal(key);
+  if (draftQueue.has(key)) return local?.data || null; // локальный ещё не успел уйти на сервер — он новее
+  try {
+    const remote = await api("GET", `/api/drafts/${encodeURIComponent(key)}`);
+    if (!local || new Date(remote.updated_at).getTime() >= local.at) return remote.data;
+    return local.data;
+  } catch {
+    return local?.data || null; // 404 — черновика на сервере нет; или нет связи
+  }
+}
+
 function draftClear(key) {
   try {
-    localStorage.removeItem(key);
+    localStorage.removeItem(localDraftKey(key));
   } catch {
     /* ignore */
   }
+  draftQueue.set(key, null);
+  flushDrafts();
 }
 
 function ideaDraftData(form) {
   const data = {};
   for (const name of IDEA_FORM_FIELDS) data[name] = form.elements[name].value;
+  data.autofill_text = $("autofill-text").value; // «Быстрый старт» тоже не должен теряться
   return data;
 }
 
@@ -550,29 +612,47 @@ function setupIdeaForm() {
   $("idea-questions").innerHTML = [...BLOCKS, { ...PARTNER_QUESTION, required: true }].map(questionField).join("");
 
   let saveTimer = null;
+  const saveNow = () => {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    const data = ideaDraftData(form);
+    draftSave(draftKey("idea-draft"), data);
+    $("idea-draft-note").hidden = !draftHasText(data);
+  };
   const saveDraft = () => {
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      draftSave(draftKey("idea-draft"), ideaDraftData(form));
-      $("idea-draft-note").hidden = !draftLoad(draftKey("idea-draft"));
-    }, 300);
+    saveTimer = setTimeout(saveNow, 300);
   };
   form.addEventListener("input", saveDraft);
   form.addEventListener("change", saveDraft);
+  // Свернули приложение сразу после ввода — сохраняем, не дожидаясь паузы
+  const saveOnHide = () => {
+    if (!saveTimer) return;
+    saveNow();
+    flushDrafts(true);
+  };
+  document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && saveOnHide());
+  window.addEventListener("pagehide", saveOnHide);
+  $("autofill-text").addEventListener("input", saveDraft); // поле «Быстрого старта» стоит вне формы
 
-  $("open-idea").addEventListener("click", () => {
+  $("open-idea").addEventListener("click", async () => {
     formError("idea-error", null);
     form.reset();
     $("autofill-text").value = "";
     formError("autofill-error", null);
-    const draft = draftLoad(draftKey("idea-draft"));
-    if (draft) {
+    $("idea-draft-note").hidden = true;
+    show("idea");
+
+    // Черновик может прийти с сервера не мгновенно — подставляем, только если человек ещё ничего не начал вводить
+    const draft = await draftLoad(draftKey("idea-draft"));
+    const untouched = !$("autofill-text").value.trim() && IDEA_FORM_FIELDS.every((name) => !form.elements[name].value.trim());
+    if (draft && draftHasText(draft) && untouched) {
       if (LEGACY_CATEGORY[draft.category]) draft.category = LEGACY_CATEGORY[draft.category];
       for (const name of IDEA_FORM_FIELDS) if (typeof draft[name] === "string") form.elements[name].value = draft[name];
+      if (typeof draft.autofill_text === "string") $("autofill-text").value = draft.autofill_text;
+      $("idea-draft-note").hidden = false;
       toast("Восстановили незаконченную проверку идеи");
     }
-    $("idea-draft-note").hidden = !draft;
-    show("idea");
   });
 
   // Быстрый старт: ИИ раскладывает описание по полям. Поля, которые ИИ заполнил, ненадолго подсвечиваются.
@@ -610,6 +690,7 @@ function setupIdeaForm() {
   $("idea-draft-clear").addEventListener("click", async () => {
     if (!(await confirmDialog("Все ответы в форме будут удалены.", { title: "Очистить форму?", ok: "Очистить" }))) return;
     form.reset();
+    $("autofill-text").value = "";
     draftClear(draftKey("idea-draft"));
     $("idea-draft-note").hidden = true;
     formError("idea-error", null);
@@ -919,11 +1000,13 @@ function setupTasks(s) {
   box.querySelectorAll("[data-result-box]").forEach((resultBox) => {
     const id = resultBox.dataset.resultBox;
     const textarea = resultBox.querySelector("textarea");
-    const draft = draftLoad(draftKey("task-draft", id));
-    if (draft && draft.result) {
-      textarea.value = draft.result;
-      toggle(id, true, false);
-    }
+    draftLoad(draftKey("task-draft", id)).then((draft) => {
+      // подставляем, только если поле ещё пустое и карточка не перерисована
+      if (draft && draft.result && !textarea.value && textarea.isConnected) {
+        textarea.value = draft.result;
+        toggle(id, true, false);
+      }
+    });
     textarea.addEventListener("input", () => draftSave(draftKey("task-draft", id), { result: textarea.value }));
   });
   box.querySelectorAll("[data-result-open]").forEach((b) => b.addEventListener("click", () => toggle(b.dataset.resultOpen, true)));
@@ -1694,6 +1777,14 @@ function setupSearchForm() {
 }
 
 // Карточка чужого проекта (в поиске и в приглашениях)
+// Вместо повторного отклика — статус уже отправленного
+const MY_OFFER_NOTE = {
+  new: "✓ Вы откликнулись — ждём ответа основателя. Он придёт в чат с ботом.",
+  accepted: "🎉 MATCH — основатель принял ваш отклик. Контакты во вкладке «Контакты».",
+  rejected: "Основатель уже ответил на ваш отклик.",
+};
+const myOfferNote = (status) => `<p class="my-offer-note" data-my-offer="${esc(status)}">${MY_OFFER_NOTE[status] || MY_OFFER_NOTE.new}</p>`;
+
 function projectForCandidate(s, ai) {
   const isOwn = state.user && Number(s.founder_id) === state.user.user_id;
   const rows = [
@@ -1716,7 +1807,9 @@ function projectForCandidate(s, ai) {
     ${isOwn
       ? `<p class="muted">Это ваш проект</p>`
       : `${isDemoId(s.founder_id) ? `<p class="muted demo-note">Демо-проект: основатель вымышленный и примет отклик автоматически — так можно пройти путь до MATCH.</p>` : ""}
-         <button class="btn primary block" type="button" data-respond="${s.id}" data-name="${esc(s.name)}" ${isDemoId(s.founder_id) ? "data-demo" : ""}>Откликнуться</button>
+         ${s.my_offer
+           ? myOfferNote(s.my_offer)
+           : `<button class="btn primary block" type="button" data-respond="${s.id}" data-name="${esc(s.name)}" ${isDemoId(s.founder_id) ? "data-demo" : ""}>Откликнуться</button>`}
          <div class="card-foot">${reportButton("startup", s.id, s.name)}</div>`}
   </article>`;
 }
@@ -1767,19 +1860,32 @@ function setupOfferForm() {
       return;
     }
     const button = form.querySelector("button[type=submit]");
+    const startupId = state.offerStartupId;
+    // Кнопки «Откликнуться» этого проекта на всех экранах меняем на статус — повторно не откликнуться
+    const markApplied = () => {
+      document.querySelectorAll(`[data-respond="${startupId}"]`).forEach((b) => b.outerHTML = myOfferNote("new"));
+      if ($("invites-list")?.innerHTML.trim()) loadResponses(); // проект уходит из «Приглашений»
+    };
     try {
       await busy(button, "Отправляем…", () =>
         api("POST", "/api/offers", {
-          startup_id: state.offerStartupId,
+          startup_id: startupId,
           type: form.elements.type.value,
           message: form.elements.message.value.trim(),
         })
       );
       closeOfferSheet();
+      markApplied();
       toast(state.offerToDemo
         ? "Отклик отправлен. Это демо-проект — основатель примет его через несколько секунд."
         : "Отклик отправлен. Основатель получит уведомление в MAX.");
     } catch (error) {
+      if (error.code === "already_applied") {
+        closeOfferSheet();
+        markApplied();
+        toast(error.message);
+        return;
+      }
       formError("offer-error", error);
     }
   });

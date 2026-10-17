@@ -44,8 +44,21 @@ const HINT =
 
 async function sendInstruction(ctx) {
   const userId = ctx.user?.user_id;
-  if (userId) await db.ensureUser(userId);
+  if (userId) {
+    await db.ensureUser(userId);
+    await db.markBotStarted(userId);
+    publishEvent(userId); // подсказка «нажмите Начать» в открытом приложении сразу пропадёт
+  }
   await ctx.reply(INSTRUCTION);
+
+  // Пока бот не мог писать, отклики копились — сразу говорим, сколько их ждёт
+  const pending = userId ? await db.countPendingOffers(userId) : 0;
+  if (pending > 0) {
+    await ctx.reply(
+      `📬 Откликов на ваши проекты ждут ответа: ${pending}.\n\n` +
+        "Принять или отклонить можно в мини-приложении SOBRA, вкладка «Отклики»."
+    );
+  }
 }
 
 bot.command("start", async (ctx) => {
@@ -94,6 +107,12 @@ bot.on("message_created", async (ctx) => {
 
   try {
     const userId = ctx.user?.user_id || ctx.message?.sender?.user_id;
+    if (userId) {
+      // Человек пишет боту — значит, диалог есть и уведомления дойдут
+      await db.ensureUser(userId);
+      await db.markBotStarted(userId);
+      publishEvent(userId);
+    }
     const link = userId ? findMaxLink(ctx.message) : null;
     if (link) {
       await db.ensureUser(userId);

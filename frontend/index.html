@@ -25,6 +25,11 @@
   </header>
 
   <main class="content" id="content">
+    <!-- Бот не смог прислать уведомление: человек не нажимал «Начать» в чате с ботом -->
+    <div id="bot-banner" class="bot-banner" role="status" hidden>
+      <b>🔔 Вы пропускаете уведомления об откликах</b>
+      <p>MAX разрешает боту писать только после кнопки «Начать». Вернитесь в чат с ботом SOBRA и нажмите «Начать» — или отправьте ему любое сообщение.<span id="bot-banner-pending"></span></p>
+    </div>
     <!-- Нет авторизации -->
     <section id="view-auth" class="view" hidden>
       <div class="card center">

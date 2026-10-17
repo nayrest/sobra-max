@@ -346,15 +346,29 @@ async function getSearchProfile(userId) {
 // OFFERS
 // ======================================================
 
+// Один отклик на проект от одного человека: повторный не создаётся (вернётся null).
+// Тестовым учётным записям жюри повтор разрешён — автопроверки гоняются много раз.
 async function createOffer(startupId, senderId, senderName, type, message) {
   const { rows } = await pool.query(
     `INSERT INTO offers (startup_id, sender_id, sender_name, type, message, status)
-     VALUES ($1, $2, $3, $4, $5, 'new')
+     SELECT $1, $2, $3, $4, $5, 'new'
+     WHERE $6 OR NOT EXISTS (SELECT 1 FROM offers WHERE startup_id = $1 AND sender_id = $2)
      RETURNING *`,
-    [startupId, senderId, senderName || null, type, message]
+    [startupId, senderId, senderName || null, type, message, isTestUser(senderId)]
   );
 
-  return rows[0];
+  return rows[0] || null;
+}
+
+// Статусы моих откликов по проектам: { [startup_id]: 'new' | 'accepted' | 'rejected' }
+async function getMyOfferStatuses(userId) {
+  const { rows } = await pool.query(
+    `SELECT DISTINCT ON (startup_id) startup_id, status
+     FROM offers WHERE sender_id = $1
+     ORDER BY startup_id, id DESC`,
+    [userId]
+  );
+  return Object.fromEntries(rows.map((r) => [Number(r.startup_id), r.status]));
 }
 
 async function getOfferWithStartup(offerId) {
@@ -525,6 +539,11 @@ async function getInvitedUserIds(startupId) {
   return rows.map((row) => Number(row.user_id));
 }
 
+// Приглашение ещё ждёт ответа: пользователь не откликался на этот проект
+// (после отклика или MATCH проект уходит из «Приглашений»)
+const INVITE_OPEN = (i) =>
+  `NOT EXISTS (SELECT 1 FROM offers o WHERE o.startup_id = ${i}.startup_id AND o.sender_id = ${i}.user_id)`;
+
 // Приглашения, которые получил пользователь, по опубликованным проектам
 async function getInvitesForUser(userId) {
   const { rows } = await pool.query(
@@ -534,6 +553,7 @@ async function getInvitesForUser(userId) {
      JOIN startups s ON s.id = i.startup_id
      LEFT JOIN search_profiles sp ON sp.user_id = s.founder_id
      WHERE i.user_id = $1 AND s.status = 'published' AND ${NOT_HIDDEN_STARTUP("s")}
+       AND ${INVITE_OPEN("i")}
      ORDER BY i.id DESC`,
     [userId]
   );
@@ -761,14 +781,86 @@ async function getCounters(userId) {
           WHERE s.founder_id = $1 AND o.status = 'new'
             AND o.created_at > COALESCE((SELECT seen_responses_at FROM users WHERE user_id = $1), 'epoch'::timestamptz))
        + (SELECT COUNT(*)::int FROM invites i JOIN startups s ON s.id = i.startup_id
-          WHERE i.user_id = $1 AND s.status = 'published'
+          WHERE i.user_id = $1 AND s.status = 'published' AND ${INVITE_OPEN("i")}
             AND i.created_at > COALESCE((SELECT seen_responses_at FROM users WHERE user_id = $1), 'epoch'::timestamptz)) AS responses,
        (SELECT COUNT(*)::int FROM offers o
           WHERE o.sender_id = $1 AND o.status = 'accepted'
-            AND o.decided_at > COALESCE((SELECT seen_contacts_at FROM users WHERE user_id = $1), 'epoch'::timestamptz)) AS contacts`,
+            AND o.decided_at > COALESCE((SELECT seen_contacts_at FROM users WHERE user_id = $1), 'epoch'::timestamptz)) AS contacts,
+       (SELECT COUNT(*)::int FROM offers o JOIN startups s ON s.id = o.startup_id
+          WHERE s.founder_id = $1 AND o.status = 'new') AS pending,
+       (SELECT bot_unreachable_at IS NOT NULL FROM users WHERE user_id = $1) AS bot_unreachable`,
     [userId]
   );
-  return { responses: rows[0]?.responses || 0, contacts: rows[0]?.contacts || 0 };
+  const r = rows[0] || {};
+  return {
+    responses: r.responses || 0,
+    contacts: r.contacts || 0,
+    pending: r.pending || 0, // отклики на мои проекты, по которым я ещё не решил
+    bot_unreachable: Boolean(r.bot_unreachable), // бот не смог мне написать: я не нажимал «Начать»
+  };
+}
+
+// Пользователь нажал «Начать» или написал боту — теперь бот может присылать уведомления
+async function markBotStarted(userId) {
+  await pool.query(
+    `UPDATE users SET bot_started_at = NOW(), bot_unreachable_at = NULL WHERE user_id = $1`,
+    [userId]
+  );
+}
+
+// Уведомление не дошло: MAX не даёт писать тем, кто не нажимал «Начать»
+async function markBotUnreachable(userId) {
+  await pool.query(
+    `UPDATE users SET bot_unreachable_at = NOW() WHERE user_id = $1`,
+    [userId]
+  );
+}
+
+// Сколько откликов на проекты основателя ждут решения (для сообщения после «Начать»)
+async function countPendingOffers(founderId) {
+  const { rows } = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM offers o JOIN startups s ON s.id = o.startup_id
+     WHERE s.founder_id = $1 AND o.status = 'new'`,
+    [founderId]
+  );
+  return rows[0]?.n || 0;
+}
+
+// ======================================================
+// ЧЕРНОВИКИ ФОРМ (дубль localStorage на сервере)
+// ======================================================
+
+const DRAFT_TTL_DAYS = 30;
+
+async function getDraft(userId, key) {
+  const { rows } = await pool.query(
+    `SELECT data, updated_at FROM drafts
+     WHERE user_id = $1 AND key = $2 AND updated_at > NOW() - INTERVAL '${DRAFT_TTL_DAYS} days'`,
+    [userId, key]
+  );
+  return rows[0] || null;
+}
+
+async function saveDraft(userId, key, data) {
+  await pool.query(
+    `INSERT INTO drafts (user_id, key, data, updated_at) VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (user_id, key) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`,
+    [userId, key, JSON.stringify(data)]
+  );
+  // Заодно убираем старые черновики этого пользователя
+  await pool.query(
+    `DELETE FROM drafts WHERE user_id = $1 AND updated_at < NOW() - INTERVAL '${DRAFT_TTL_DAYS} days'`,
+    [userId]
+  );
+}
+
+async function deleteDraft(userId, key) {
+  await pool.query(`DELETE FROM drafts WHERE user_id = $1 AND key = $2`, [userId, key]);
+}
+
+async function countDrafts(userId) {
+  const { rows } = await pool.query(`SELECT COUNT(*)::int AS n FROM drafts WHERE user_id = $1`, [userId]);
+  return rows[0]?.n || 0;
 }
 
 async function markSeen(userId, section) {
@@ -839,6 +931,14 @@ async function demoRespondToInvites(typeByGoal) {
 
 module.exports = {
   pool,
+  getMyOfferStatuses,
+  markBotStarted,
+  markBotUnreachable,
+  countPendingOffers,
+  getDraft,
+  saveDraft,
+  deleteDraft,
+  countDrafts,
   isDemoUser,
   demoAcceptOffers,
   demoRespondToInvites,
