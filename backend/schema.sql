@@ -258,3 +258,9 @@ CREATE TABLE IF NOT EXISTS drafts (
 -- bot_unreachable_at — уведомление не дошло, в приложении показываем подсказку.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS bot_started_at TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS bot_unreachable_at TIMESTAMPTZ;
+
+-- С чем человек пришёл (экран «Что хотите сделать?», отзыв экспертов 17.10.2026):
+-- idea — только проверить идею, partner — найти партнёра в свой проект, join — присоединиться к чужому.
+-- NULL — ещё не выбирал. Проекту без поиска партнёра seeking = NULL.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS intent TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS intent_at TIMESTAMPTZ;

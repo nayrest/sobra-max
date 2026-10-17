@@ -418,7 +418,9 @@ paths:
     patch:
       tags: [Проекты]
       summary: Обновить блоки карты вручную
-      description: Передаются только изменённые поля Idea Check. Карта и план пересчитываются.
+      description: |
+        Передаются только изменённые поля Idea Check. Карта и план пересчитываются.
+        Если меняются только seeking и partner_needed (включение подбора партнёра) — карта не пересчитывается.
       operationId: updateStartup
       requestBody:
         required: true
@@ -450,7 +452,10 @@ paths:
     post:
       tags: [Проекты]
       summary: Опубликовать проект
-      description: После публикации проект виден кандидатам в поиске и доступен ИИ-подбор.
+      description: |
+        После публикации проект виден кандидатам в поиске и доступен ИИ-подбор.
+        Проекту «только проверить идею» сначала нужно указать, кого ищем (PATCH seeking + partner_needed),
+        иначе 409 с кодом partner_required.
       operationId: publishStartup
       parameters: [{ $ref: "#/components/parameters/StartupId" }]
       responses:
@@ -461,7 +466,16 @@ paths:
               schema: { $ref: "#/components/schemas/Startup" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "409": { $ref: "#/components/responses/ProfileRequired" }
+        "409":
+          description: Не указано, кого ищем (code = partner_required), или не заполнен профиль (code = profile_required)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Error" }
+                  - type: object
+                    properties:
+                      code: { type: string, enum: [partner_required, profile_required] }
 
   # ================= План действий =================
 
@@ -800,6 +814,57 @@ paths:
               schema: { type: string, example: "event: counters\ndata: {}\n\n" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /me:
+    get:
+      tags: [Профиль]
+      summary: С чем пришёл пользователь — для экрана «Что хотите сделать?»
+      description: |
+        intent — выбор на первом экране: idea (только проверить идею), partner (найти партнёра в свой проект),
+        join (присоединиться к чужому). null — ещё не выбирал. Экран показывается новичку:
+        без выбора, без проектов и без профиля.
+      operationId: getMe
+      responses:
+        "200":
+          description: Состояние пользователя
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user_id, intent, has_projects, has_profile]
+                properties:
+                  user_id: { type: integer, format: int64 }
+                  intent: { type: string, nullable: true, enum: [idea, partner, join, null] }
+                  has_projects: { type: boolean }
+                  has_profile: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /me/intent:
+    put:
+      tags: [Профиль]
+      summary: Сохранить выбор на первом экране
+      operationId: saveIntent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [intent]
+              properties:
+                intent: { type: string, enum: [idea, partner, join] }
+      responses:
+        "200":
+          description: Сохранено
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [intent]
+                properties:
+                  intent: { type: string, enum: [idea, partner, join] }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
   /drafts/{key}:
     parameters:
       - name: key
@@ -1135,6 +1200,7 @@ components:
         problem: { type: string, maxLength: 3000 }
         solution: { type: string, maxLength: 3000 }
         partner_needed: { type: string, maxLength: 3000 }
+        seeking: { type: string, enum: [Команда / co-founder, Партнёрство], description: Включить подбор партнёра для проекта «только проверить идею». Карта при этом не пересчитывается }
         competitors: { type: string, maxLength: 3000, nullable: true }
         traction: { type: string, maxLength: 3000, nullable: true }
         business_model: { type: string, maxLength: 3000, nullable: true }
@@ -1142,13 +1208,16 @@ components:
 
     StartupInput:
       type: object
-      required: [name, category, market_type, stage, seeking, customer, problem, solution, partner_needed]
+      description: |
+        Без seeking — режим «только проверить идею»: partner_needed тогда необязателен.
+        Подбор партнёра можно включить позже через PATCH (seeking + partner_needed).
+      required: [name, category, market_type, stage, customer, problem, solution]
       properties:
         name: { type: string, maxLength: 100, example: Кофейня у дома }
         category: { type: string, enum: ["Ресторан / кафе / кофейня", "Магазин / E-commerce", "Услуги", "Производство", "Образование", "Финансы", "Технологии / IT / SaaS", "AI / ИИ", "Маркетинг / медиа", "Логистика / доставка", "Другое"], description: Старые значения (AI, SaaS, FoodTech, FinTech, EdTech, E-commerce) тоже принимаются и переводятся в новые }
         market_type: { type: string, enum: [B2B, B2C, B2B2C] }
         stage: { $ref: "#/components/schemas/Stage" }
-        seeking: { type: string, enum: [Команда / co-founder, Партнёрство] }
+        seeking: { type: string, enum: [Команда / co-founder, Партнёрство], description: Кого ищет основатель. Если передан — partner_needed обязателен }
         customer: { type: string, maxLength: 1000, description: Целевая аудитория }
         problem: { type: string, maxLength: 1000 }
         solution: { type: string, maxLength: 1000 }
@@ -1212,7 +1281,7 @@ components:
         category: { type: string }
         market_type: { type: string }
         stage: { $ref: "#/components/schemas/Stage" }
-        seeking: { type: string }
+        seeking: { type: string, nullable: true, description: "null — проект «только проверить идею», партнёр не нужен" }
         status: { type: string, enum: [draft, published] }
         customer: { type: string, nullable: true }
         problem: { type: string, nullable: true }

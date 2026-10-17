@@ -39,6 +39,33 @@
       </div>
     </section>
 
+    <!-- ================= ПЕРВЫЙ ВХОД: С ЧЕМ ПРИШЛИ ================= -->
+    <!-- Отзыв экспертов онлайн-этапа: отдельный сценарий для тех, кому не нужен партнёр -->
+    <section id="view-start" class="view" hidden>
+      <div class="page-head">
+        <h1>Что хотите сделать?</h1>
+        <p>SOBRA подстроит путь под вашу задачу. Передумать можно в любой момент.</p>
+      </div>
+      <div class="start-options">
+        <button class="start-option" type="button" data-intent="idea">
+          <span class="start-icon" aria-hidden="true">💡</span>
+          <span class="start-text"><b>Проверить идею</b>
+            <small>Разберём идею, покажем, что подтверждено, а что нужно проверить, и дадим план. Партнёр не нужен, регистрация тоже.</small></span>
+        </button>
+        <button class="start-option" type="button" data-intent="partner">
+          <span class="start-icon" aria-hidden="true">🤝</span>
+          <span class="start-text"><b>Найти партнёра в свой проект</b>
+            <small>Проверим идею и подберём людей с нужными навыками. ИИ объяснит, почему они подходят.</small></span>
+        </button>
+        <button class="start-option" type="button" data-intent="join">
+          <span class="start-icon" aria-hidden="true">🚀</span>
+          <span class="start-text"><b>Присоединиться к команде</b>
+            <small>Найдите проект, где нужны ваши навыки, и откликнитесь. Контакты откроются только по взаимному согласию.</small></span>
+        </button>
+      </div>
+      <p class="center"><button class="text-btn" type="button" id="start-skip">Сначала просто посмотрю</button></p>
+    </section>
+
     <!-- ================= ОСНОВАТЕЛЬ ================= -->
 
     <section id="view-projects" class="view" hidden>
@@ -95,12 +122,17 @@
                 <option value="">Выберите</option><option>Идея</option><option>Прототип</option>
                 <option>MVP</option><option>Первые продажи</option><option>Масштабирование</option>
               </select></label>
-            <label class="field"><span>Кого ищете <b class="required">*</b></span>
+            <label class="field" id="seeking-field"><span>Кого ищете <b class="required">*</b></span>
               <select class="input" name="seeking">
                 <option value="">Выберите</option>
                 <option>Команда / co-founder</option>
                 <option>Партнёрство</option>
               </select></label>
+            <label class="switch-field wide">
+              <input type="checkbox" id="want-partner" checked>
+              <span><b>Ищу партнёра или людей в команду</b>
+                <small class="muted">Снимите галочку, если сейчас нужно только проверить идею. Найти партнёра можно будет позже из карты проекта.</small></span>
+            </label>
           </div>
         </div>
 

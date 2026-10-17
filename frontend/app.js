@@ -112,6 +112,7 @@ const state = {
   offerStartupId: null,
   lastSearchGoal: null,
   lastUpdate: null, // результат последнего шага Update: показываем баннер «было → стало»
+  intent: null, // с чем пришёл: idea — только проверить идею, partner — найти партнёра, join — присоединиться
 };
 
 // ======================================================
@@ -253,7 +254,7 @@ async function busy(button, text, action) {
 }
 
 function seekingText(s) {
-  return s.seeking || "Не указано";
+  return s.seeking || "Только проверка идеи";
 }
 
 // ======================================================
@@ -485,7 +486,7 @@ async function loadProjects() {
           <div class="grow">
             <h3>${esc(s.name)}</h3>
             <div class="chips">
-              ${s.status === "published" ? badge("Опубликован", "green") : badge("Черновик", "amber")}
+              ${s.status === "published" ? badge("Опубликован", "green") : s.seeking ? badge("Черновик", "amber") : badge("Проверка идеи", "blue")}
               ${badge(s.stage)} ${badge(s.category, "violet")}
             </div>
           </div>
@@ -604,7 +605,21 @@ function ideaDraftData(form) {
   const data = {};
   for (const name of IDEA_FORM_FIELDS) data[name] = form.elements[name].value;
   data.autofill_text = $("autofill-text").value; // «Быстрый старт» тоже не должен теряться
+  data.want_partner = $("want-partner").checked ? "yes" : "no";
   return data;
+}
+
+// Режим «только проверить идею» (отзыв экспертов): без вопросов о партнёре.
+// Партнёра можно включить позже — из карты проекта.
+function wantsPartner() {
+  return $("want-partner").checked;
+}
+
+function applyPartnerMode() {
+  const want = wantsPartner();
+  $("seeking-field").hidden = !want;
+  const partnerField = $("idea-form").elements.partner_needed.closest(".field");
+  if (partnerField) partnerField.hidden = !want;
 }
 
 function setupIdeaForm() {
@@ -634,6 +649,7 @@ function setupIdeaForm() {
   document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && saveOnHide());
   window.addEventListener("pagehide", saveOnHide);
   $("autofill-text").addEventListener("input", saveDraft); // поле «Быстрого старта» стоит вне формы
+  $("want-partner").addEventListener("change", applyPartnerMode);
 
   $("open-idea").addEventListener("click", async () => {
     formError("idea-error", null);
@@ -641,6 +657,9 @@ function setupIdeaForm() {
     $("autofill-text").value = "";
     formError("autofill-error", null);
     $("idea-draft-note").hidden = true;
+    // Пришёл «только проверить идею» — вопросов о партнёре по умолчанию нет
+    $("want-partner").checked = state.intent !== "idea";
+    applyPartnerMode();
     show("idea");
 
     // Черновик может прийти с сервера не мгновенно — подставляем, только если человек ещё ничего не начал вводить
@@ -650,6 +669,10 @@ function setupIdeaForm() {
       if (LEGACY_CATEGORY[draft.category]) draft.category = LEGACY_CATEGORY[draft.category];
       for (const name of IDEA_FORM_FIELDS) if (typeof draft[name] === "string") form.elements[name].value = draft[name];
       if (typeof draft.autofill_text === "string") $("autofill-text").value = draft.autofill_text;
+      if (draft.want_partner === "yes" || draft.want_partner === "no") {
+        $("want-partner").checked = draft.want_partner === "yes";
+        applyPartnerMode();
+      }
       $("idea-draft-note").hidden = false;
       toast("Восстановили незаконченную проверку идеи");
     }
@@ -691,6 +714,8 @@ function setupIdeaForm() {
     if (!(await confirmDialog("Все ответы в форме будут удалены.", { title: "Очистить форму?", ok: "Очистить" }))) return;
     form.reset();
     $("autofill-text").value = "";
+    $("want-partner").checked = state.intent !== "idea";
+    applyPartnerMode();
     draftClear(draftKey("idea-draft"));
     $("idea-draft-note").hidden = true;
     formError("idea-error", null);
@@ -701,7 +726,9 @@ function setupIdeaForm() {
     formError("idea-error", null);
     const f = form.elements;
 
-    const required = ["name", "category", "market_type", "stage", "seeking", "customer", "problem", "solution", "partner_needed"];
+    const want = wantsPartner();
+    const required = ["name", "category", "market_type", "stage", "customer", "problem", "solution",
+      ...(want ? ["seeking", "partner_needed"] : [])];
     const emptyField = required.find((name) => !f[name].value.trim());
     if (emptyField) {
       f[emptyField].focus();
@@ -714,10 +741,14 @@ function setupIdeaForm() {
       category: f.category.value,
       market_type: f.market_type.value,
       stage: f.stage.value,
-      seeking: f.seeking.value,
       investment_amount: null,
     };
-    for (const { field } of [...BLOCKS, PARTNER_QUESTION]) body[field] = f[field].value.trim();
+    for (const { field } of BLOCKS) body[field] = f[field].value.trim();
+    // Без партнёра поле «Кого ищете» не отправляем — сервер создаст проект «только проверка идеи»
+    if (want) {
+      body.seeking = f.seeking.value;
+      body.partner_needed = f.partner_needed.value.trim();
+    }
 
     const button = form.querySelector("button[type=submit]");
     try {
@@ -766,7 +797,7 @@ function journey(s, openTasks, doneTasks) {
     },
     {
       n: "05", title: "AI Match",
-      text: published ? "Подобрать партнёра" : "Сначала опубликуйте",
+      text: !s.seeking ? "По желанию" : published ? "Подобрать партнёра" : "Сначала опубликуйте",
       state: published ? "active" : "todo", target: "match-card",
     },
   ];
@@ -874,7 +905,7 @@ function renderProject(s) {
         <div class="grow">
           <h2>${esc(s.name)}</h2>
           <div class="chips">
-            ${published ? badge("Опубликован", "green") : badge("Черновик", "amber")}
+            ${published ? badge("Опубликован", "green") : s.seeking ? badge("Черновик", "amber") : badge("Проверка идеи", "blue")}
             ${badge(s.stage)} ${badge(s.category, "violet")} ${badge(s.market_type, "gray")}
           </div>
         </div>
@@ -907,7 +938,7 @@ function renderProject(s) {
       <ul class="history">${doneTasks.map(historyItem).join("")}</ul>
     </section>` : ""}
 
-    <section class="card insight" id="match-card">
+    ${!s.seeking ? soloMatchCard(s, missingTitles) : `<section class="card insight" id="match-card">
       <p class="eyebrow">Шаг 5 · AI Match</p>
       <h3>${esc(seekingText(s))}</h3>
       <p>${esc(s.partner_needed || "Не указано")}</p>
@@ -920,7 +951,7 @@ function renderProject(s) {
              <button class="btn danger small" type="button" id="delete-project">Удалить черновик</button>
              <button class="btn primary" type="button" id="publish-project">Опубликовать</button>
            </div>`}
-    </section>
+    </section>`}
   `;
 
   const box = $("project-detail");
@@ -945,7 +976,9 @@ function renderProject(s) {
     }
   });
 
-  if (published) {
+  if (!s.seeking) {
+    setupSoloMatch(s);
+  } else if (published) {
     $("go-match").addEventListener("click", () => show("match"));
   } else {
     $("publish-project").addEventListener("click", async (e) => {
@@ -969,6 +1002,70 @@ function renderProject(s) {
       }
     });
   }
+}
+
+// Проект «только проверка идеи»: карта и план уже есть, партнёр — по желанию.
+// Включить подбор = указать, кого ищем; дальше обычный путь: публикация → AI Match.
+function soloMatchCard(s, missingTitles) {
+  return `<section class="card insight" id="match-card">
+    <p class="eyebrow">Шаг 5 · AI Match · по желанию</p>
+    <h3>Партнёр сейчас не нужен</h3>
+    <p class="muted">Карта и план уже ваши. Продолжайте проверять идею — SOBRA будет пересчитывать карту по вашим результатам.</p>
+    ${missingTitles.length ? `<p class="muted">Если не хватает рук или опыта (сейчас не проработано: ${esc(missingTitles.slice(0, 3).join(", "))}) — включите подбор, и ИИ найдёт людей с нужными навыками.</p>` : ""}
+    <form id="solo-partner-form" class="solo-partner" hidden novalidate>
+      <label class="field"><span>Кого ищете <b class="required">*</b></span>
+        <select class="input" name="seeking">
+          <option value="">Выберите</option><option>Команда / co-founder</option><option>Партнёрство</option>
+        </select></label>
+      <label class="field"><span>${esc(PARTNER_QUESTION.q)} <b class="required">*</b></span>
+        <textarea class="input textarea" name="partner_needed" maxlength="1000" placeholder="${esc(PARTNER_QUESTION.hint)}"></textarea></label>
+      <p class="form-error" id="solo-partner-error" hidden></p>
+      <div class="actions">
+        <button class="btn secondary small" type="button" id="solo-partner-cancel">Отмена</button>
+        <button class="btn primary small" type="submit">Сохранить</button>
+      </div>
+    </form>
+    <div class="actions" id="solo-actions">
+      <button class="btn danger small" type="button" id="delete-project">Удалить проект</button>
+      <button class="btn secondary" type="button" id="solo-enable">🤝 Найти партнёра</button>
+    </div>
+  </section>`;
+}
+
+function setupSoloMatch(s) {
+  const form = $("solo-partner-form");
+  const toggle = (open) => {
+    form.hidden = !open;
+    $("solo-enable").hidden = open;
+    if (open) form.elements.seeking.focus();
+  };
+  $("solo-enable").addEventListener("click", () => toggle(true));
+  $("solo-partner-cancel").addEventListener("click", () => toggle(false));
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    formError("solo-partner-error", null);
+    const seeking = form.elements.seeking.value;
+    const partner = form.elements.partner_needed.value.trim();
+    if (!seeking || !partner) {
+      formError("solo-partner-error", new Error("Выберите, кого ищете, и опишите, какие навыки нужны."));
+      return;
+    }
+    try {
+      const updated = await busy(form.querySelector("button[type=submit]"), "Сохраняем…", () =>
+        api("PATCH", `/api/startups/${s.id}`, { seeking, partner_needed: partner })
+      );
+      renderProject(updated);
+      toast("Готово. Опубликуйте проект — и ИИ подберёт людей");
+      const next = $("publish-project");
+      if (next) {
+        next.scrollIntoView({ behavior: "smooth", block: "center" });
+        next.classList.add("pulse");
+        setTimeout(() => next.classList.remove("pulse"), 4000);
+      }
+    } catch (error) {
+      formError("solo-partner-error", error);
+    }
+  });
 }
 
 // Action Plan: методика от ИИ и шаг Update
@@ -2058,6 +2155,28 @@ function showAuthError(message) {
   $("user-name").textContent = "Не авторизован";
 }
 
+// ======================================================
+// ПЕРВЫЙ ВХОД: «Что хотите сделать?» (отзыв экспертов онлайн-этапа)
+// ======================================================
+
+const INTENT_START = {
+  idea: () => { show("projects"); $("open-idea").click(); }, // сразу к проверке идеи, без вопросов о партнёре
+  partner: () => { show("projects"); $("open-idea").click(); },
+  join: () => show("search"),
+};
+
+function setupStart() {
+  document.querySelectorAll("[data-intent]").forEach((button) =>
+    button.addEventListener("click", () => {
+      const intent = button.dataset.intent;
+      state.intent = intent;
+      api("PUT", "/api/me/intent", { intent }).catch(() => {}); // выбор не критичен — путь откроется и без сохранения
+      INTENT_START[intent]();
+    })
+  );
+  $("start-skip").addEventListener("click", () => show("projects"));
+}
+
 function isProfileComplete(profile) {
   return !needsProfile(profile);
 }
@@ -2106,7 +2225,17 @@ async function authorize() {
     }
 
     state.onboarding = false;
-    show("projects");
+
+    // Новичку — экран «Что хотите сделать?». Тем, у кого уже есть проекты или профиль, — сразу «Проекты».
+    let me = null;
+    try {
+      me = await api("GET", "/api/me");
+      state.intent = me.intent;
+    } catch {
+      // не критично — просто без экрана выбора
+    }
+    if (me && !me.intent && !me.has_projects && !me.has_profile) show("start");
+    else show("projects");
     startCounters();
   } catch (error) {
     showAuthError(
@@ -2122,6 +2251,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   setupSideMenu();
   setupNavigation();
+  setupStart();
   setupIdeaForm();
   setupProfileForm();
   setupAvatar();

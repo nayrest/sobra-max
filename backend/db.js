@@ -95,7 +95,7 @@ async function getUsername(userId) {
 // Поля Idea Check, которые можно редактировать по отдельности
 const IDEA_FIELDS = [
   "customer", "problem", "solution", "competitors",
-  "traction", "business_model", "economics", "partner_needed",
+  "traction", "business_model", "economics", "partner_needed", "seeking",
 ];
 
 async function saveStartupDraft(founderId, data) {
@@ -800,6 +800,27 @@ async function getCounters(userId) {
   };
 }
 
+// С чем пришёл пользователь: idea / partner / join (экран «Что хотите сделать?»)
+async function getMe(userId) {
+  const { rows } = await pool.query(
+    `SELECT u.intent,
+       EXISTS (SELECT 1 FROM startups s WHERE s.founder_id = u.user_id AND s.status <> 'deleted') AS has_projects,
+       EXISTS (SELECT 1 FROM search_profiles p WHERE p.user_id = u.user_id AND p.contacts_consent_at IS NOT NULL) AS has_profile
+     FROM users u WHERE u.user_id = $1`,
+    [userId]
+  );
+  const r = rows[0] || {};
+  return { intent: r.intent || null, has_projects: Boolean(r.has_projects), has_profile: Boolean(r.has_profile) };
+}
+
+async function saveIntent(userId, intent) {
+  await pool.query(
+    `INSERT INTO users (user_id, intent, intent_at) VALUES ($1, $2, NOW())
+     ON CONFLICT (user_id) DO UPDATE SET intent = EXCLUDED.intent, intent_at = NOW()`,
+    [userId, intent]
+  );
+}
+
 // Пользователь нажал «Начать» или написал боту — теперь бот может присылать уведомления
 async function markBotStarted(userId) {
   await pool.query(
@@ -931,6 +952,8 @@ async function demoRespondToInvites(typeByGoal) {
 
 module.exports = {
   pool,
+  getMe,
+  saveIntent,
   getMyOfferStatuses,
   markBotStarted,
   markBotUnreachable,

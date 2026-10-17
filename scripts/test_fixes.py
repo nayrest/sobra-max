@@ -129,4 +129,37 @@ check("DELETE черновика", s == 204 and s2 == 404, (s, s2))
 s, _ = call("GET", "/api/drafts/idea-draft")
 check("без авторизации → 401", s == 401, s)
 
+# ---------- 5. Сценарий «только проверить идею» (отзыв экспертов) ----------
+SOLO = 800000000000 + RUN * 10 + 5
+s, me = call("GET", "/api/me", SOLO)
+check("новичок: intent пустой, проектов и профиля нет",
+      s == 200 and me.get("intent") is None and me.get("has_projects") is False and me.get("has_profile") is False, me)
+s, bad = call("PUT", "/api/me/intent", SOLO, {"intent": "hack"})
+check("неизвестный intent → 400", s == 400, (s, bad))
+s, me = call("PUT", "/api/me/intent", SOLO, {"intent": "idea"})
+s2, me2 = call("GET", "/api/me", SOLO)
+check("intent сохранён", s == 200 and me2.get("intent") == "idea", (s, me2))
+
+s, solo = call("POST", "/api/startups", SOLO, {
+    "name": "Кофейня без партнёра (тест)", "category": "Ресторан / кафе / кофейня", "market_type": "B2C",
+    "stage": "Идея", "customer": "Жители района", "problem": "Нет хорошего кофе утром",
+    "solution": "Окно выдачи у метро"})
+check("проект без seeking и партнёра создан (201), карта есть",
+      s == 201 and solo.get("seeking") is None and solo.get("idea_map") and solo.get("tasks"), (s, solo))
+sid_solo = solo["id"]
+s, err = call("POST", f"/api/startups/{sid_solo}/publish", SOLO, {})
+check("публикация без партнёра → 409 partner_required", s == 409 and err.get("code") == "partner_required", (s, err))
+s, err = call("PATCH", f"/api/startups/{sid_solo}", SOLO, {"seeking": "Кого-нибудь"})
+check("PATCH с неверным seeking → 400", s == 400, (s, err))
+s, upd = call("PATCH", f"/api/startups/{sid_solo}", SOLO, {"seeking": "Партнёрство", "partner_needed": "Операционный партнёр"})
+check("подбор включён: seeking и partner_needed сохранены",
+      s == 200 and upd.get("seeking") == "Партнёрство" and upd.get("partner_needed") == "Операционный партнёр", (s, upd))
+check("карта при этом не потерялась", bool(upd.get("idea_map")) and bool(upd.get("tasks")), upd)
+s, err = call("POST", f"/api/startups/{sid_solo}/publish", SOLO, {})
+check("дальше публикация просит профиль (409 profile_required)", s == 409 and err.get("code") == "profile_required", (s, err))
+s, me = call("GET", "/api/me", SOLO)
+check("после создания проекта has_projects = true", me.get("has_projects") is True, me)
+s, err = call("POST", "/api/startups", SOLO, {"name": "Пустой", "category": "Услуги", "market_type": "B2C", "stage": "Идея"})
+check("без ответов о сути — по-прежнему 400", s == 400, (s, err))
+
 print(f"\nИтого: {ok_count} OK, {fail_count} FAIL")

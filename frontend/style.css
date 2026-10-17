@@ -600,3 +600,35 @@ img { -webkit-user-drag: none; }                          /* картинки н
 }
 .bot-banner b { display: block; margin-bottom: 4px; }
 .bot-banner p { margin: 0; color: #5d4a1f; }
+
+/* ---------- Первый вход: «Что хотите сделать?» ---------- */
+.start-options { display: grid; gap: 12px; margin: 4px 0 16px; }
+.start-option {
+  display: flex; align-items: flex-start; gap: 14px; width: 100%; text-align: left;
+  padding: 16px; border: 1px solid #e3e8f5; border-radius: var(--radius); background: #fff;
+  box-shadow: 0 6px 18px rgba(19, 33, 75, 0.05); cursor: pointer; font: inherit; color: inherit;
+}
+.start-option:hover { border-color: #c9d5f6; }
+.start-option:active { transform: scale(0.99); }
+.start-option:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.start-icon {
+  flex: 0 0 44px; height: 44px; display: grid; place-items: center;
+  border-radius: 14px; background: #eef3ff; font-size: 22px;
+}
+.start-text { display: flex; flex-direction: column; gap: 4px; }
+.start-text b { font-size: 16px; color: #1d2f5e; }
+.start-text small { font-size: 13px; color: var(--muted); line-height: 1.4; }
+.center { text-align: center; }
+
+/* Переключатель «Ищу партнёра» в форме проверки идеи */
+.switch-field {
+  display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px;
+  border: 1px solid #e3e8f5; border-radius: 14px; background: #f8faff; cursor: pointer;
+}
+.switch-field input { width: 20px; height: 20px; margin: 1px 0 0; flex: 0 0 auto; accent-color: var(--blue); }
+.switch-field span { display: flex; flex-direction: column; gap: 3px; font-size: 14px; color: #1d2f5e; }
+.switch-field small { font-size: 12px; font-weight: 400; }
+.form-grid .switch-field { grid-column: 1 / -1; }
+
+/* Проект «только проверка идеи»: включить подбор партнёра */
+.solo-partner { display: grid; gap: 12px; margin-top: 12px; }

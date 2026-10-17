@@ -586,7 +586,10 @@ function createApi({ notify = {} } = {}) {
 
   app.post("/api/startups", wrap(async (req, res) => {
     const body = req.body || {};
-    const seeking = requireOneOf(body.seeking, Object.values(SEEKING), "seeking");
+    // Без seeking — режим «только проверить идею»: партнёр не нужен, вопрос о нём не задаём.
+    // Найти партнёра можно позже: PATCH seeking + partner_needed, затем публикация.
+    const solo = body.seeking === undefined || body.seeking === null || body.seeking === "";
+    const seeking = solo ? null : requireOneOf(body.seeking, Object.values(SEEKING), "seeking");
 
     const data = {
       name: requireText(body, "name", 100),
@@ -596,7 +599,9 @@ function createApi({ notify = {} } = {}) {
       seeking,
       investment_amount: null,
     };
-    for (const field of REQUIRED_IDEA) data[field] = requireText(body, field);
+    for (const field of REQUIRED_IDEA) {
+      data[field] = solo && field === "partner_needed" ? optionalText(body, field) : requireText(body, field);
+    }
     for (const field of OPTIONAL_IDEA) data[field] = optionalText(body, field);
 
     await enforceDailyLimit(req, "startups");
@@ -653,10 +658,14 @@ function createApi({ notify = {} } = {}) {
     for (const field of OPTIONAL_IDEA) {
       if (field in body) fields[field] = optionalText(body, field, IDEA_FIELD_MAX);
     }
+    // Включить подбор партнёра для проекта, созданного в режиме «только проверить идею»
+    if ("seeking" in body) fields.seeking = requireOneOf(body.seeking, Object.values(SEEKING), "seeking");
     if (Object.keys(fields).length === 0) throw new ApiError(400, "Нет полей для обновления");
 
     const updated = await db.updateIdeaFields(startup.id, req.user.userId, fields);
-    res.json(await withTasks(await withIdeaMap(updated)));
+    // Кого ищем — не часть карты: пересчитывать её (и звать ИИ) незачем
+    const onlyPartner = Object.keys(fields).every((f) => f === "seeking" || f === "partner_needed");
+    res.json(await withTasks(onlyPartner ? updated : await withIdeaMap(updated)));
   }));
 
   // /my и /public/:id объявлены раньше /:id, чтобы не перехватывались им
@@ -752,6 +761,10 @@ function createApi({ notify = {} } = {}) {
   app.post("/api/startups/:id/publish", wrap(async (req, res) => {
     const startup = await getOwnStartup(req);
     if (startup.status === "published") return res.json(startup);
+    // Публикуют, чтобы найти людей. Проекту «только проверить идею» сначала нужно сказать, кого ищем.
+    if (!startup.seeking || !String(startup.partner_needed || "").trim()) {
+      throw new ApiError(409, "Чтобы опубликовать проект, укажите, кого ищете: команду или партнёра и с какими навыками.", "partner_required");
+    }
     await requireCompleteProfile(req, "Чтобы опубликовать проект, заполните профиль: контакты увидит только тот, с кем случится MATCH.");
 
     const published = await db.publishStartup(startup.id, req.user.userId);
@@ -1150,6 +1163,19 @@ function createApi({ notify = {} } = {}) {
 
   app.get("/api/events/ticket", wrap(async (req, res) => {
     res.json({ ticket: createEventTicket(req.user.userId, botToken), expires_in: EVENT_TICKET_TTL_SECONDS });
+  }));
+
+  // ---------- с чем пришёл пользователь (экран «Что хотите сделать?») ----------
+  const INTENTS = ["idea", "partner", "join"];
+
+  app.get("/api/me", wrap(async (req, res) => {
+    res.json({ user_id: req.user.userId, ...(await db.getMe(req.user.userId)) });
+  }));
+
+  app.put("/api/me/intent", wrap(async (req, res) => {
+    const intent = requireOneOf(req.body?.intent, INTENTS, "intent");
+    await db.saveIntent(req.user.userId, intent);
+    res.json({ intent });
   }));
 
   // ---------- черновики незаконченных форм ----------

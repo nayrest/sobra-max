@@ -15,6 +15,9 @@ WITH real_users   AS (SELECT * FROM users WHERE user_id NOT BETWEEN 900000000000
                        WHERE c.user_id NOT BETWEEN 900000000000 AND 910000000999)
 SELECT 'Пользователей (открыли бота или мини-приложение)' AS "Показатель", COUNT(*)::text AS "Значение" FROM real_users
 UNION ALL SELECT '  из них за последние 7 дней', COUNT(*)::text FROM real_users WHERE created_at > NOW() - INTERVAL '7 days'
+UNION ALL SELECT '  выбор на первом экране: идея / партнёр / команда',
+          (COUNT(*) FILTER (WHERE intent = 'idea'))::text || ' / ' || (COUNT(*) FILTER (WHERE intent = 'partner'))::text
+          || ' / ' || (COUNT(*) FILTER (WHERE intent = 'join'))::text FROM real_users
 UNION ALL SELECT 'Заполнили профиль полностью (с согласием)', COUNT(*)::text FROM real_profiles
           WHERE contacts_consent_at IS NOT NULL AND about IS NOT NULL AND about <> ''
 UNION ALL SELECT '  открыли профиль основателям', COUNT(*)::text FROM real_profiles WHERE visible AND contacts_consent_at IS NOT NULL
@@ -26,6 +29,7 @@ UNION ALL SELECT 'Проектов создано (прошли Idea Check)', CO
 UNION ALL SELECT '  опубликовано (включая удалённые потом)', COUNT(*)::text FROM real_startups WHERE status IN ('published', 'deleted')
 UNION ALL SELECT '  удалено основателями после публикации', COUNT(*)::text FROM real_startups WHERE status = 'deleted'
 UNION ALL SELECT '  основателей (разных людей)', COUNT(DISTINCT founder_id)::text FROM real_startups
+UNION ALL SELECT '  только проверка идеи (без поиска партнёра)', COUNT(*)::text FROM real_startups WHERE seeking IS NULL
 UNION ALL SELECT '  средняя готовность, %', COALESCE(ROUND(AVG(readiness))::text, '—') FROM real_startups
 UNION ALL SELECT 'Update: внесено результатов проверок', COUNT(*)::text FROM action_tasks t JOIN real_startups s ON s.id = t.startup_id
           WHERE t.status = 'done' AND t.result IS NOT NULL
