@@ -899,9 +899,14 @@ function setupIdeaForm() {
       body.partner_needed = f.partner_needed.value.trim();
     }
 
-    const button = form.querySelector("button[type=submit]");
+    // В пошаговом режиме нажимают «Построить карту» — блокируем именно её, а не скрытую кнопку формы.
+    // Флаг защищает от двойного нажатия: иначе создавались бы два одинаковых проекта.
+    if (state.ideaSubmitting) return;
+    state.ideaSubmitting = true;
+    const button = wizard.on ? $("wizard-next") : form.querySelector("button[type=submit]");
+    $("wizard-back").disabled = true;
     try {
-      const startup = await busy(button, "SOBRA анализирует ответы…", () => api("POST", "/api/startups", body));
+      const startup = await busy(button, "SOBRA строит карту…", () => api("POST", "/api/startups", body));
       draftClear(draftKey("idea-draft"));
       $("idea-draft-note").hidden = true;
       form.reset();
@@ -909,6 +914,9 @@ function setupIdeaForm() {
       openProject(startup.id);
     } catch (error) {
       formError("idea-error", error);
+    } finally {
+      state.ideaSubmitting = false;
+      $("wizard-back").disabled = false;
     }
   });
 }
