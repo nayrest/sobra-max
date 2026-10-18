@@ -469,19 +469,29 @@ function createApi({ notify = {} } = {}) {
 
   // ---------- суточные лимиты против массового сбора контактов и спама ----------
   // Тестовые учётные записи жюри лимитами не ограничены: автопроверки гоняются много раз.
+  // Счёт идёт за последние 24 часа (скользящее окно), удалённые проекты тоже считаются
   const DAILY_LIMITS = {
-    startups: { max: 10, text: "Сегодня создано уже 10 проектов — это максимум на сутки" },
-    offers: { max: 20, text: "Сегодня отправлено уже 20 откликов — это максимум на сутки" },
-    invites: { max: 30, text: "Сегодня отправлено уже 30 приглашений — это максимум на сутки" },
-    decisions: { max: 50, text: "Сегодня принято уже 50 решений по откликам — это максимум на сутки" },
-    reports: { max: 20, text: "Сегодня отправлено уже 20 жалоб — это максимум на сутки" },
+    startups: { max: 10, text: "За последние сутки создано уже 10 проектов — это максимум" },
+    offers: { max: 20, text: "За последние сутки отправлено уже 20 откликов — это максимум" },
+    invites: { max: 30, text: "За последние сутки отправлено уже 30 приглашений — это максимум" },
+    decisions: { max: 50, text: "За последние сутки принято уже 50 решений по откликам — это максимум" },
+    reports: { max: 20, text: "За последние сутки отправлено уже 20 жалоб — это максимум" },
   };
 
+  // Аккаунты команды без лимитов — для репетиций и показа на защите.
+  // LIMIT_EXEMPT_USER_IDS=111,222 в .env на сервере (id пользователей MAX через запятую)
+  const LIMIT_EXEMPT = new Set(
+    String(process.env.LIMIT_EXEMPT_USER_IDS || "")
+      .split(",")
+      .map((v) => Number(v.trim()))
+      .filter((v) => Number.isSafeInteger(v) && v > 0)
+  );
+
   async function enforceDailyLimit(req, kind) {
-    if (db.isTestUser(req.user.userId)) return;
+    if (db.isTestUser(req.user.userId) || LIMIT_EXEMPT.has(req.user.userId)) return;
     const limit = DAILY_LIMITS[kind];
     if ((await db.countRecent(kind, req.user.userId)) >= limit.max) {
-      throw new ApiError(429, `${limit.text}. Попробуйте завтра.`);
+      throw new ApiError(429, `${limit.text}. Попробуйте позже — лимит освобождается через сутки после каждого действия.`);
     }
   }
 
@@ -1235,6 +1245,14 @@ function createApi({ notify = {} } = {}) {
 
   app.get("/api/me", wrap(async (req, res) => {
     res.json({ user_id: req.user.userId, ...(await db.getMe(req.user.userId)) });
+  }));
+
+  // SOBRA Pro: оплаты пока нет — считаем, сколько людей увидели тариф и нажали «Подключить»
+  app.post("/api/pro/event", wrap(async (req, res) => {
+    const event = requireOneOf(req.body?.event, ["shown", "click", "dismiss"], "event");
+    const source = requireOneOf(req.body?.source || "match", ["match", "profile"], "source");
+    await db.logProEvent(req.user.userId, event, source);
+    res.json({ ok: true });
   }));
 
   app.put("/api/me/intent", wrap(async (req, res) => {

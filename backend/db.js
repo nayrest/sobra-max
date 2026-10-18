@@ -826,13 +826,28 @@ async function getCounters(userId) {
 async function getMe(userId) {
   const { rows } = await pool.query(
     `SELECT u.intent,
+       EXISTS (SELECT 1 FROM pro_interest pi WHERE pi.user_id = u.user_id AND pi.event = 'click') AS pro_clicked,
+       EXISTS (SELECT 1 FROM pro_interest pi WHERE pi.user_id = u.user_id AND pi.event = 'dismiss') AS pro_dismissed,
        EXISTS (SELECT 1 FROM startups s WHERE s.founder_id = u.user_id AND s.status <> 'deleted') AS has_projects,
        EXISTS (SELECT 1 FROM search_profiles p WHERE p.user_id = u.user_id AND p.contacts_consent_at IS NOT NULL) AS has_profile
      FROM users u WHERE u.user_id = $1`,
     [userId]
   );
   const r = rows[0] || {};
-  return { intent: r.intent || null, has_projects: Boolean(r.has_projects), has_profile: Boolean(r.has_profile) };
+  return {
+    intent: r.intent || null,
+    has_projects: Boolean(r.has_projects),
+    has_profile: Boolean(r.has_profile),
+    pro: { clicked: Boolean(r.pro_clicked), dismissed: Boolean(r.pro_dismissed) },
+  };
+}
+
+// Интерес к SOBRA Pro: первое событие каждого вида на человека, повторы не пишем
+async function logProEvent(userId, event, source) {
+  await pool.query(
+    `INSERT INTO pro_interest (user_id, event, source) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+    [userId, event, source]
+  );
 }
 
 async function saveIntent(userId, intent) {
@@ -978,6 +993,7 @@ module.exports = {
   updateSkills,
   getMe,
   saveIntent,
+  logProEvent,
   getMyOfferStatuses,
   markBotStarted,
   markBotUnreachable,

@@ -224,4 +224,18 @@ s, found = call("POST", "/api/search", SK_B, {"goal": "team", "category": "Об�
 mine = [m for m in found.get("matches", []) if m["startup"]["id"] == sk["id"]]
 check("поиск отдаёт skills_common", mine and mine[0].get("skills_common") == ["Python", "B2B_продажи"], mine)
 
+# ---------- 8. SOBRA Pro: интерес к тарифу (оплаты нет) ----------
+s, _ = call("POST", "/api/pro/event", SK_A, {"event": "shown", "source": "match"})
+check("Pro: показ записывается", s == 200, s)
+s, me = call("GET", "/api/me", SK_A)
+check("Pro: до нажатия clicked = false", me.get("pro") == {"clicked": False, "dismissed": False}, me)
+call("POST", "/api/pro/event", SK_A, {"event": "click", "source": "match"})
+call("POST", "/api/pro/event", SK_A, {"event": "click", "source": "profile"})  # повтор не ломает
+s, me = call("GET", "/api/me", SK_A)
+check("Pro: после «Подключить» clicked = true", me.get("pro", {}).get("clicked") is True, me)
+s, err = call("POST", "/api/pro/event", SK_A, {"event": "pay"})
+check("Pro: неизвестное событие → 400", s == 400, (s, err))
+s, err = call("POST", "/api/pro/event", SK_A, {"event": "click", "source": "evil"})
+check("Pro: неизвестный источник → 400", s == 400, (s, err))
+
 print(f"\nИтого: {ok_count} OK, {fail_count} FAIL")

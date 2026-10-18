@@ -7,6 +7,7 @@ services:
     environment:
       BOT_TOKEN: ${BOT_TOKEN}
       BOT_DISABLED: ${BOT_DISABLED:-false}
+      LIMIT_EXEMPT_USER_IDS: ${LIMIT_EXEMPT_USER_IDS:-}
       NODE_EXTRA_CA_CERTS: /usr/local/share/ca-certificates/russian_trusted_root_ca.crt
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       API_PORT: 3000

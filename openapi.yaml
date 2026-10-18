@@ -837,6 +837,40 @@ paths:
                   intent: { type: string, nullable: true, enum: [idea, partner, join, null] }
                   has_projects: { type: boolean }
                   has_profile: { type: boolean }
+                  pro:
+                    type: object
+                    description: Интерес к SOBRA Pro — нажимал ли «Подключить» и «Продолжить бесплатно»
+                    properties:
+                      clicked: { type: boolean }
+                      dismissed: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /pro/event:
+    post:
+      tags: [Профиль]
+      summary: Интерес к тарифу SOBRA Pro
+      description: >-
+        Оплаты пока нет. Карточка тарифа показывается под результатами подбора и в профиле;
+        сервер записывает первое событие каждого вида на пользователя (повторы игнорируются),
+        чтобы посчитать, сколько людей увидели тариф и нажали «Подключить». Бесплатные функции не ограничиваются.
+      operationId: logProEvent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [event]
+              properties:
+                event: { type: string, enum: [shown, click, dismiss] }
+                source: { type: string, enum: [match, profile], default: match }
+      responses:
+        "200":
+          description: Записано
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /me/intent:

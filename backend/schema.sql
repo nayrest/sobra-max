@@ -273,3 +273,14 @@ ALTER TABLE startups ADD COLUMN IF NOT EXISTS links JSONB NOT NULL DEFAULT '[]':
 -- у кандидата — что умеет, у проекта — какие навыки нужны партнёру. ["Python", "B2B_продажи"], не больше 10
 ALTER TABLE search_profiles ADD COLUMN IF NOT EXISTS skills JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE startups ADD COLUMN IF NOT EXISTS skills JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+-- Интерес к тарифу SOBRA Pro (оплаты пока нет — проверяем, готовы ли платить).
+-- Одна строка на человека и событие: shown — увидел карточку, click — нажал «Подключить», dismiss — «Продолжить бесплатно».
+-- source — где это случилось: match (под результатами подбора) или profile.
+CREATE TABLE IF NOT EXISTS pro_interest (
+  user_id    BIGINT NOT NULL,
+  event      TEXT NOT NULL CHECK (event IN ('shown', 'click', 'dismiss')),
+  source     TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, event)
+);
