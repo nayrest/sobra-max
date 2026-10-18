@@ -709,3 +709,4 @@ img { -webkit-user-drag: none; }                          /* картинки н
 .skill-more { font-size: 13px; padding: 6px 4px; }
 .change-intent { margin: 10px 0 2px; }
 .change-intent .text-btn { font-size: 14px; }
+.confirm-check { margin: 4px 0 12px; font-size: 14px; }

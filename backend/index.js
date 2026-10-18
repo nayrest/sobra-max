@@ -168,6 +168,14 @@ const notify = {
     );
   },
 
+  async contactsRemoved(info) {
+    await bot.api.sendMessageToUser(
+      info.sender_id,
+      "Основатель удалил проект «" + info.startup_name + "» и скрыл контакты по нему.\n\n" +
+        "Во вкладке «Контакты» этого проекта больше нет. Найти другие проекты можно во вкладке «Поиск»."
+    );
+  },
+
   async offerRejected(offer) {
     await bot.api.sendMessageToUser(
       offer.sender_id,

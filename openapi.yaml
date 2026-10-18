@@ -441,8 +441,15 @@ paths:
       summary: Удалить проект
       description: >-
         Черновик удаляется полностью. Опубликованный проект исчезает из поиска, подбора и приглашений,
-        ожидающие отклики отклоняются; уже случившиеся MATCH и контакты у собеседников сохраняются.
+        ожидающие отклики отклоняются. Уже случившиеся MATCH и контакты по умолчанию сохраняются у обеих сторон;
+        с drop_contacts=1 контакты по этому проекту скрываются у обеих сторон, участники получают уведомление в боте.
       operationId: deleteStartup
+      parameters:
+        - name: drop_contacts
+          in: query
+          required: false
+          description: 1 — удалить и контакты с участниками, с кем был MATCH
+          schema: { type: string, enum: ["0", "1"], default: "0" }
       responses:
         "204": { description: Проект удалён }
         "401": { $ref: "#/components/responses/Unauthorized" }

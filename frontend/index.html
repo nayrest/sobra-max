@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#f7f9ff">
   <title>SOBRA AI</title>
-  <link rel="stylesheet" href="style.css?v=2026-10-17-9">
+  <link rel="stylesheet" href="style.css?v=2026-10-18-3">
   <!-- MAX Bridge: даёт window.WebApp.initData для авторизации -->
   <script src="https://st.max.ru/js/max-web-app.js"></script>
 </head>
@@ -388,6 +388,10 @@
     <div class="sheet confirm-sheet" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-text">
       <h2 id="confirm-title">Подтвердите действие</h2>
       <p class="muted" id="confirm-text"></p>
+      <label class="check confirm-check" id="confirm-check-wrap" hidden>
+        <input type="checkbox" id="confirm-check">
+        <span id="confirm-check-text"></span>
+      </label>
       <div class="actions">
         <button type="button" class="btn secondary" id="confirm-cancel">Отмена</button>
         <button type="button" class="btn danger" id="confirm-ok">Да</button>
@@ -405,6 +409,6 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
-  <script src="app.js?v=2026-10-17-9"></script>
+  <script src="app.js?v=2026-10-18-3"></script>
 </body>
 </html>

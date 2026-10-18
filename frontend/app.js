@@ -177,7 +177,8 @@ function dateText(value) {
 // Окно подтверждения в стиле приложения. В MAX на ПК мини-приложение работает внутри
 // движка браузера, и системный confirm() выглядит как окно браузера — поэтому свой диалог.
 // Возвращает Promise<boolean>.
-function confirmDialog(text, { title = "Подтвердите действие", ok = "Да", danger = true } = {}) {
+// checkbox — подпись необязательной галочки; тогда результат { ok, checked }, иначе true/false
+function confirmDialog(text, { title = "Подтвердите действие", ok = "Да", danger = true, checkbox = null } = {}) {
   return new Promise((resolve) => {
     const sheet = $("confirm-sheet");
     const okBtn = $("confirm-ok");
@@ -186,6 +187,9 @@ function confirmDialog(text, { title = "Подтвердите действие"
     $("confirm-text").textContent = text;
     okBtn.textContent = ok;
     okBtn.className = `btn ${danger ? "danger" : "primary"}`;
+    $("confirm-check-wrap").hidden = !checkbox;
+    $("confirm-check").checked = false; // по умолчанию — безопасный вариант
+    $("confirm-check-text").textContent = checkbox || "";
     const previousFocus = document.activeElement;
     sheet.hidden = false;
     cancelBtn.focus(); // по умолчанию безопасный вариант
@@ -199,10 +203,11 @@ function confirmDialog(text, { title = "Подтвердите действие"
       if (previousFocus && typeof previousFocus.focus === "function") previousFocus.focus();
       resolve(result);
     };
-    const onOk = () => close(true);
-    const onCancel = () => close(false);
-    const onBackdrop = (e) => { if (e.target === sheet) close(false); };
-    const onKey = (e) => { if (e.key === "Escape") close(false); };
+    const result = (ok) => (checkbox ? { ok, checked: ok && $("confirm-check").checked } : ok);
+    const onOk = () => close(result(true));
+    const onCancel = () => close(result(false));
+    const onBackdrop = (e) => { if (e.target === sheet) close(result(false)); };
+    const onKey = (e) => { if (e.key === "Escape") close(result(false)); };
 
     okBtn.addEventListener("click", onOk);
     cancelBtn.addEventListener("click", onCancel);
@@ -1134,13 +1139,32 @@ function renderProject(s) {
 
   $("delete-project").addEventListener("click", async (e) => {
     const button = e.currentTarget; // после await currentTarget уже пустой
-    const text = published
-      ? "Проект пропадёт из поиска и подбора, ожидающие отклики будут отклонены. MATCH и контакты у тех, с кем вы уже договорились, сохранятся. Действие нельзя отменить."
-      : "Проект и его карта будут удалены. Это действие нельзя отменить.";
-    if (!(await confirmDialog(text, { title: published ? "Удалить проект?" : "Удалить черновик?", ok: "Удалить" }))) return;
+    // С кем по этому проекту уже был MATCH — им можно оставить контакты или убрать их
+    let matches = 0;
+    if (published) {
+      try {
+        const { contacts } = await api("GET", "/api/contacts");
+        matches = contacts.filter((c) => Number(c.startup_id) === Number(s.id)).length;
+      } catch {
+        /* не узнали — просто не предлагаем галочку */
+      }
+    }
+    const text = !published
+      ? "Проект и его карта будут удалены. Это действие нельзя отменить."
+      : matches
+        ? `Проект пропадёт из поиска и подбора, ожидающие отклики будут отклонены. MATCH с участниками: ${matches}. Если не отмечать галочку, контакты останутся у вас и у них. Действие нельзя отменить.`
+        : "Проект пропадёт из поиска и подбора, ожидающие отклики будут отклонены. Действие нельзя отменить.";
+    const answer = await confirmDialog(text, {
+      title: published ? "Удалить проект?" : "Удалить черновик?",
+      ok: "Удалить",
+      checkbox: matches ? `Удалить и контакты с участниками (${matches}) — они получат уведомление` : null,
+    });
+    const confirmed = typeof answer === "object" ? answer.ok : answer;
+    const dropContacts = typeof answer === "object" && answer.checked;
+    if (!confirmed) return;
     try {
-      await busy(button, "Удаляем…", () => api("DELETE", `/api/startups/${s.id}`));
-      toast(published ? "Проект удалён" : "Черновик удалён");
+      await busy(button, "Удаляем…", () => api("DELETE", `/api/startups/${s.id}${dropContacts ? "?drop_contacts=1" : ""}`));
+      toast(!published ? "Черновик удалён" : dropContacts ? "Проект и контакты по нему удалены" : "Проект удалён");
       show("projects");
     } catch (error) {
       toast(error.message, "error");

@@ -284,3 +284,7 @@ CREATE TABLE IF NOT EXISTS pro_interest (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (user_id, event)
 );
+
+-- Основатель удалил проект и выбрал «удалить и контакты с участниками»:
+-- MATCH остаются в истории (статистика), но контакты по проекту больше не показываются ни одной стороне.
+ALTER TABLE startups ADD COLUMN IF NOT EXISTS contacts_removed_at TIMESTAMPTZ;

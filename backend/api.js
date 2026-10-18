@@ -407,7 +407,7 @@ function createApi({ notify = {} } = {}) {
   const recipientOf = (fn, args) => {
     if (fn === notify.newOffer) return args[0]?.founder_id;
     if (fn === notify.invite) return args[1];
-    if (fn === notify.offerAccepted || fn === notify.offerRejected) return args[0]?.sender_id;
+    if (fn === notify.offerAccepted || fn === notify.offerRejected || fn === notify.contactsRemoved) return args[0]?.sender_id;
     return null;
   };
 
@@ -835,8 +835,12 @@ function createApi({ notify = {} } = {}) {
 
   app.delete("/api/startups/:id", wrap(async (req, res) => {
     const startup = await getOwnStartup(req);
-    const affected = await db.deleteStartup(startup.id, req.user.userId);
+    // ?drop_contacts=1 — удалить и контакты с участниками, с кем был MATCH (по умолчанию контакты сохраняются)
+    const flag = new URL(req.originalUrl || req.url || "/", "http://local").searchParams.get("drop_contacts");
+    const dropContacts = flag === "1" || flag === "true";
+    const { affected, dropped } = await db.deleteStartup(startup.id, req.user.userId, dropContacts);
     for (const userId of affected) publishEvent(userId);
+    for (const d of dropped) await safeNotify(notify.contactsRemoved, d);
     res.status(204).end();
   }));
 

@@ -238,4 +238,25 @@ check("Pro: неизвестное событие → 400", s == 400, (s, err))
 s, err = call("POST", "/api/pro/event", SK_A, {"event": "click", "source": "evil"})
 check("Pro: неизвестный источник → 400", s == 400, (s, err))
 
+# ---------- 9. Удаление проекта: контакты с участниками — по выбору основателя ----------
+def match_project(name):
+    s, p = call("POST", "/api/startups", SK_F, {
+        "name": name, "category": "Услуги", "market_type": "B2C", "stage": "Идея", "seeking": "Партнёрство",
+        "customer": "Соседи", "problem": "Нет мастера", "solution": "Мастер по вызову", "partner_needed": "Продажи"})
+    call("POST", f"/api/startups/{p['id']}/publish", SK_F, {})
+    s, off = call("POST", "/api/offers", SK_B, {"startup_id": p["id"], "type": "partner", "message": "Готов помочь"})
+    call("POST", f"/api/offers/{off['id']}/accept", SK_F, {})
+    return p["id"]
+has = lambda uid, path, sid: any(int(c.get("startup_id", 0)) == sid for c in call("GET", path, uid)[1].get("contacts" if path == "/api/contacts" else "matches", []))
+keep = match_project("Удаление: контакты остаются")
+check("до удаления MATCH виден обоим", has(SK_F, "/api/contacts", keep) and has(SK_B, "/api/matches", keep))
+s, _ = call("DELETE", f"/api/startups/{keep}", SK_F)
+check("удаление без галочки — контакты остаются у обоих", s == 204 and has(SK_F, "/api/contacts", keep) and has(SK_B, "/api/matches", keep))
+drop = match_project("Удаление: контакты убраны")
+s, _ = call("DELETE", f"/api/startups/{drop}?drop_contacts=1", SK_F)
+check("удаление с галочкой — контакты пропали у обоих",
+      s == 204 and not has(SK_F, "/api/contacts", drop) and not has(SK_B, "/api/matches", drop))
+s, cnt = call("GET", "/api/counters", SK_B)
+check("счётчик контактов не считает скрытые", s == 200 and isinstance(cnt.get("contacts"), int), cnt)
+
 print(f"\nИтого: {ok_count} OK, {fail_count} FAIL")

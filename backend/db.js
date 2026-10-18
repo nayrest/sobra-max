@@ -197,24 +197,41 @@ async function publishStartup(startupId, founderId) {
 // Опубликованный помечается status = 'deleted': он пропадает из поиска, подбора и приглашений,
 // ожидающие отклики отклоняются, а уже случившиеся MATCH и контакты у собеседников сохраняются.
 // Возвращает id людей, чьи отклики отклонены (им обновим счётчики).
-async function deleteStartup(startupId, founderId) {
+// dropContacts — основатель решил убрать и контакты с теми, с кем был MATCH.
+// Возвращает { affected: кому обновить экран, dropped: [{ sender_id, startup_name }] — кому написать, что контакты скрыты }
+async function deleteStartup(startupId, founderId, dropContacts = false) {
   const { rows } = await pool.query(
     `SELECT status FROM startups WHERE id = $1 AND founder_id = $2`,
     [startupId, founderId]
   );
-  if (!rows[0]) return [];
+  if (!rows[0]) return { affected: [], dropped: [] };
   if (rows[0].status === "draft") {
     await pool.query(`DELETE FROM startups WHERE id = $1 AND founder_id = $2 AND status = 'draft'`, [startupId, founderId]);
-    return [];
+    return { affected: [], dropped: [] };
   }
-  await pool.query(`UPDATE startups SET status = 'deleted' WHERE id = $1 AND founder_id = $2`, [startupId, founderId]);
+  await pool.query(
+    `UPDATE startups SET status = 'deleted',
+       contacts_removed_at = CASE WHEN $3 THEN NOW() ELSE contacts_removed_at END
+     WHERE id = $1 AND founder_id = $2`,
+    [startupId, founderId, Boolean(dropContacts)]
+  );
   const rejected = await pool.query(
     `UPDATE offers SET status = 'rejected', decided_at = NOW()
      WHERE startup_id = $1 AND status = 'new'
      RETURNING sender_id`,
     [startupId]
   );
-  return [...new Set(rejected.rows.map((r) => Number(r.sender_id)))];
+  let dropped = [];
+  if (dropContacts) {
+    const matched = await pool.query(
+      `SELECT DISTINCT o.sender_id, s.name AS startup_name FROM offers o JOIN startups s ON s.id = o.startup_id
+       WHERE o.startup_id = $1 AND o.status = 'accepted'`,
+      [startupId]
+    );
+    dropped = matched.rows.map((r) => ({ sender_id: Number(r.sender_id), startup_name: r.startup_name }));
+  }
+  const affected = new Set([...rejected.rows.map((r) => Number(r.sender_id)), ...dropped.map((d) => d.sender_id)]);
+  return { affected: [...affected], dropped };
 }
 
 async function getFounderStartups(founderId) {
@@ -456,6 +473,7 @@ async function getContactsForFounder(founderId) {
      LEFT JOIN users cu ON cu.user_id = offers.sender_id
      WHERE startups.founder_id = $1
        AND offers.status = 'accepted'
+       AND startups.contacts_removed_at IS NULL
      ORDER BY offers.id DESC`,
     [founderId]
   );
@@ -489,6 +507,7 @@ async function getContactsForCandidate(senderId) {
      LEFT JOIN users u ON u.user_id = startups.founder_id
      WHERE offers.sender_id = $1
        AND offers.status = 'accepted'
+       AND startups.contacts_removed_at IS NULL
      ORDER BY offers.id DESC`,
     [senderId]
   );
@@ -805,8 +824,8 @@ async function getCounters(userId) {
        + (SELECT COUNT(*)::int FROM invites i JOIN startups s ON s.id = i.startup_id
           WHERE i.user_id = $1 AND s.status = 'published' AND ${INVITE_OPEN("i")}
             AND i.created_at > COALESCE((SELECT seen_responses_at FROM users WHERE user_id = $1), 'epoch'::timestamptz)) AS responses,
-       (SELECT COUNT(*)::int FROM offers o
-          WHERE o.sender_id = $1 AND o.status = 'accepted'
+       (SELECT COUNT(*)::int FROM offers o JOIN startups s ON s.id = o.startup_id
+          WHERE o.sender_id = $1 AND o.status = 'accepted' AND s.contacts_removed_at IS NULL
             AND o.decided_at > COALESCE((SELECT seen_contacts_at FROM users WHERE user_id = $1), 'epoch'::timestamptz)) AS contacts,
        (SELECT COUNT(*)::int FROM offers o JOIN startups s ON s.id = o.startup_id
           WHERE s.founder_id = $1 AND o.status = 'new') AS pending,
