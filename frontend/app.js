@@ -644,7 +644,7 @@ function wizardSteps() {
   const steps = [
     { id: "quick", title: "Быстрый старт", next: "Дальше без ИИ →" },
     { id: "about", title: "О проекте", required: ["name", "category", "market_type", "stage"] },
-    ...BLOCKS.map((b) => ({ id: b.id, title: b.title, required: b.required ? [b.field] : [], optional: !b.required })),
+    ...BLOCKS.map((b) => ({ id: b.id, title: b.title, required: b.required ? [b.field] : [], fields: [b.field], optional: !b.required })),
   ];
   if (wantsPartner()) steps.push({ id: "partner", title: "Кого ищете", required: ["seeking", "partner_needed"] });
   return steps;
@@ -727,6 +727,21 @@ function wizardNext() {
   wizardGo(wizard.i + 1);
 }
 
+// Необязательный шаг: пока поле пустое — одна кнопка «Пропустить →», когда ответ есть — «Дальше →».
+// Две кнопки, которые делают одно и то же, только путают. На последнем шаге всегда «Построить карту».
+function updateWizardButtons() {
+  if (!wizard.ready || !wizard.on) return;
+  const form = $("idea-form");
+  const steps = wizardSteps();
+  const step = steps[wizard.i];
+  if (!step) return;
+  const last = wizard.i === steps.length - 1;
+  const filled = (step.fields || []).some((name) => form.elements[name].value.trim());
+  const skipOnly = step.optional && !last && !filled;
+  $("wizard-skip").hidden = !skipOnly;
+  $("wizard-next").hidden = skipOnly;
+}
+
 function renderWizard(focus = false) {
   if (!wizard.ready) return;
   const view = $("view-idea");
@@ -754,8 +769,8 @@ function renderWizard(focus = false) {
   $("wizard-count").textContent = `Шаг ${wizard.i + 1} из ${steps.length} · ${step.title}`;
   $("wizard-bar").style.width = `${Math.round(((wizard.i + 1) / steps.length) * 100)}%`;
   $("wizard-back").hidden = wizard.i === 0;
-  $("wizard-skip").hidden = !step.optional;
   $("wizard-next").textContent = last ? "Построить карту проекта →" : step.next || "Дальше →";
+  updateWizardButtons();
 
   if (focus) {
     const target = step.id === "quick"
@@ -794,6 +809,7 @@ function setupIdeaForm() {
   document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && saveOnHide());
   window.addEventListener("pagehide", saveOnHide);
   $("autofill-text").addEventListener("input", saveDraft); // поле «Быстрого старта» стоит вне формы
+  form.addEventListener("input", updateWizardButtons); // «Пропустить» ↔ «Дальше» по мере ввода
   $("want-partner").addEventListener("change", applyPartnerMode);
   setupWizard();
 
