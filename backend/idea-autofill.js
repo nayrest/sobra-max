@@ -22,9 +22,10 @@ const SYSTEM_PROMPT = `Ты помогаешь начинающему предп
 - stage — строго одно из: {STAGES}. Если стадия не названа — "Идея".
 - seeking — строго "Команда / co-founder" (нужен человек в команду) или "Партнёрство" (нужно сотрудничество с другой компанией или специалистом). Если не ясно — "Команда / co-founder".
 - name — короткое рабочее название проекта, до 5 слов.
+- wants_partner — true, если автор прямо пишет, что ищет партнёра, co-founder'а или людей в команду; иначе false.
 
 Ответь строго JSON-объектом без пояснений вокруг:
-{"name": "", "category": "", "market_type": "", "stage": "", "seeking": "", "customer": "", "problem": "", "solution": "", "competitors": "", "traction": "", "business_model": "", "economics": "", "partner_needed": ""}`;
+{"name": "", "category": "", "market_type": "", "stage": "", "seeking": "", "customer": "", "problem": "", "solution": "", "competitors": "", "traction": "", "business_model": "", "economics": "", "partner_needed": "", "wants_partner": false}`;
 
 const TEXT_FIELDS = ["customer", "problem", "solution", "competitors", "traction", "business_model", "economics", "partner_needed"];
 const FIELD_MAX = 1000;
@@ -36,6 +37,14 @@ function cleanText(value, max = FIELD_MAX) {
 function pick(value, allowed, fallback) {
   const v = cleanText(value, 100);
   return allowed.includes(v) ? v : fallback;
+}
+
+// Запасная проверка, если модель не вернула wants_partner: «ищу co-founder'а», «нужен маркетолог в команду»
+const SEEK_WORDS = /(ищу|ищем|ищет|в\s+поиск|зову|приглаша)[^.!?]{0,80}(co-?founder|кофаундер|сооснова|партн[её]р|в\s+команд|разработчик|программист|маркетолог|дизайнер|продаж|людей|специалист)|нуж(ен|на|ны)\s+(co-?founder|кофаундер|сооснова|партн[её]р|разработчик|программист|маркетолог|дизайнер|люди\s+в\s+команд)/i;
+
+function mentionsPartner(description) {
+  const text = String(description || "");
+  return SEEK_WORDS.test(text) || /co-?founder|кофаундер|сооснователь/i.test(text);
 }
 
 function parseFields(text, { categories, stages, marketTypes, seekingValues }) {
@@ -53,6 +62,7 @@ function parseFields(text, { categories, stages, marketTypes, seekingValues }) {
     seeking: pick(raw.seeking, seekingValues, seekingValues[0]),
   };
   for (const field of TEXT_FIELDS) fields[field] = cleanText(raw[field]);
+  fields.wants_partner = raw.wants_partner === true || raw.wants_partner === "true";
   return fields;
 }
 
@@ -66,7 +76,10 @@ async function autofillIdea(description, dictionaries) {
     .replace("{CATEGORIES}", dictionaries.categories.map((c) => `"${c}"`).join(", "))
     .replace("{STAGES}", dictionaries.stages.map((s) => `"${s}"`).join(", "));
   const text = await ai.callWithRetry(`Описание идеи:\n${description}`, system, { maxTokens: 1200, temperature: 0.2 });
-  return parseFields(text, dictionaries);
+  const fields = parseFields(text, dictionaries);
+  // Модель может ответить false на «MVP делаю сам, ищу co-founder'а» — слова в описании важнее
+  if (!fields.wants_partner && mentionsPartner(description)) fields.wants_partner = true;
+  return fields;
 }
 
-module.exports = { autofillIdea, parseFields };
+module.exports = { autofillIdea, parseFields, mentionsPartner };

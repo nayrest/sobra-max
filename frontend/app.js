@@ -845,6 +845,16 @@ function setupIdeaForm() {
     if (hasAnswers && !(await confirmDialog("Ответы в форме заменятся предложениями ИИ. Потом их можно поправить.", { title: "Заполнить форму заново?", ok: "Заполнить", danger: false }))) return;
     try {
       const { fields } = await busy(button, "ИИ заполняет форму…", () => api("POST", "/api/startups/autofill", { description }));
+      // В описании сказано «ищу co-founder'а / людей в команду» — включаем вопросы о партнёре сами.
+      // Обратно не выключаем: галочку мог поставить сам человек или выбранный сценарий.
+      const partnerTurnedOn = fields.wants_partner === true && !wantsPartner();
+      if (partnerTurnedOn) {
+        $("want-partner").checked = true;
+        applyPartnerMode();
+        const sw = $("want-partner").closest(".switch-field");
+        sw.classList.add("autofilled");
+        setTimeout(() => sw.classList.remove("autofilled"), 2500);
+      }
       for (const name of IDEA_FORM_FIELDS) {
         const el = form.elements[name];
         if (typeof fields[name] !== "string") continue;
@@ -857,10 +867,14 @@ function setupIdeaForm() {
       }
       saveDraft();
       if (wizard.on) {
-        toast("ИИ заполнил ответы. Проверьте каждый шаг и нажимайте «Дальше».");
+        toast(partnerTurnedOn
+          ? "ИИ заполнил ответы и включил поиск партнёра — вы пишете, что ищете людей в команду. Проверьте каждый шаг."
+          : "ИИ заполнил ответы. Проверьте каждый шаг и нажимайте «Дальше».");
         wizardGo(1);
       } else {
-        toast("Черновик готов. Проверьте ответы и поправьте, где ИИ ошибся.");
+        toast(partnerTurnedOn
+          ? "Черновик готов, поиск партнёра включён. Проверьте ответы и поправьте, где ИИ ошибся."
+          : "Черновик готов. Проверьте ответы и поправьте, где ИИ ошибся.");
         form.querySelector(".card").scrollIntoView({ behavior: "smooth", block: "start" });
       }
     } catch (error) {

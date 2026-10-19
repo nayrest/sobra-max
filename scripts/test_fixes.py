@@ -259,4 +259,13 @@ check("удаление с галочкой — контакты пропали 
 s, cnt = call("GET", "/api/counters", SK_B)
 check("счётчик контактов не считает скрытые", s == 200 and isinstance(cnt.get("contacts"), int), cnt)
 
+print("\n10. Автозаполнение включает поиск партнёра")
+s, af = call("POST", "/api/startups/autofill", SK_F, {"description": "Сервис обмена учебниками между студентами. MVP делаю сам, ищу в команду co-founder'а на продажи."})
+if s == 503:
+    print("     пропущено: ИИ выключен (в CI нет ключа YandexGPT)")
+else:
+    check("«ищу co-founder'а» → wants_partner = true", s == 200 and af["fields"].get("wants_partner") is True, (s, af))
+    s, af = call("POST", "/api/startups/autofill", SK_F, {"description": "Хочу проверить идею обмена учебниками, первокурсники тратят на них много денег."})
+    check("без поиска людей → wants_partner = false", s == 200 and af["fields"].get("wants_partner") is False, (s, af))
+
 print(f"\nИтого: {ok_count} OK, {fail_count} FAIL")

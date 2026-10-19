@@ -1322,6 +1322,7 @@ components:
         business_model: { type: string, maxLength: 1000, description: Пусто, если в описании не было }
         economics: { type: string, maxLength: 1000, description: Пусто, если в описании не было }
         partner_needed: { type: string, maxLength: 1000 }
+        wants_partner: { type: boolean, description: "В описании сказано, что автор ищет партнёра или людей в команду — фронтенд включает галочку «Ищу партнёра»" }
 
     MapBlock:
       type: object
