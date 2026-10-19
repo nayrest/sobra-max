@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#f7f9ff">
   <title>SOBRA AI</title>
-  <link rel="stylesheet" href="style.css?v=2026-10-19-3">
+  <link rel="stylesheet" href="style.css?v=2026-10-20-1">
   <!-- MAX Bridge: даёт window.WebApp.initData для авторизации -->
   <script src="https://st.max.ru/js/max-web-app.js"></script>
 </head>
@@ -292,14 +292,24 @@
     <!-- ================= ОБЩЕЕ ================= -->
 
     <section id="view-responses" class="view" hidden>
-      <div class="page-head"><h1>Отклики</h1><p>Входящие отклики на ваши проекты и приглашения от основателей.</p></div>
-      <div class="safety-note">
-        <b>🛡 Осторожно с мошенниками.</b> SOBRA никогда не берёт деньги за знакомство. Не переводите деньги «за вход в команду» или «за участие», не сообщайте коды из SMS и пароли. Если собеседник просит об этом — нажмите «Пожаловаться».
+      <div class="page-head"><h1>Отклики и приглашения</h1></div>
+      <div class="safety-compact">
+        <span class="safety-ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.5 3 8.2 7 10 4-1.8 7-5.5 7-10V6z"/><path d="M12 8v4.5M12 15.5v.01"/></svg>
+        </span>
+        <div class="safety-body">
+          <b>Осторожно с мошенниками</b>
+          <p>SOBRA не берёт деньги за знакомство.</p>
+          <p class="safety-full" hidden>Не переводите деньги «за вход в команду» или «за участие», не сообщайте коды из SMS и пароли. Если собеседник просит об этом — нажмите «Пожаловаться».</p>
+        </div>
+        <button type="button" class="safety-more" data-safety-toggle aria-expanded="false">Подробнее</button>
       </div>
-      <h2 class="section">Отклики на мои проекты</h2>
-      <div id="offers-list" class="list"></div>
-      <h2 class="section">Меня пригласили</h2>
-      <div id="invites-list" class="list"></div>
+      <div class="seg" role="tablist" aria-label="Отклики и приглашения">
+        <button type="button" class="seg-btn active" role="tab" aria-selected="true" data-seg-tab="offers">Отклики <span class="seg-count" id="count-offers">0</span></button>
+        <button type="button" class="seg-btn" role="tab" aria-selected="false" data-seg-tab="invites">Приглашения <span class="seg-count" id="count-invites">0</span></button>
+      </div>
+      <div class="seg-panel" data-seg-panel="offers"><div id="offers-list" class="list"></div></div>
+      <div class="seg-panel" data-seg-panel="invites" hidden><div id="invites-list" class="list"></div></div>
     </section>
 
     <section id="view-contacts" class="view" hidden>
@@ -307,10 +317,12 @@
       <div class="safety-note">
         <b>🛡 Осторожно с мошенниками.</b> SOBRA никогда не берёт деньги за знакомство. Не переводите деньги «за вход в команду» или «за участие», не сообщайте коды из SMS и пароли. Если собеседник просит об этом — нажмите «Пожаловаться».
       </div>
-      <h2 class="section">Мои кандидаты</h2>
-      <div id="contacts-list" class="list"></div>
-      <h2 class="section">Проекты, которые приняли меня</h2>
-      <div id="matches-list" class="list"></div>
+      <div class="seg" role="tablist" aria-label="Контакты">
+        <button type="button" class="seg-btn active" role="tab" aria-selected="true" data-seg-tab="candidates">Мои кандидаты <span class="seg-count" id="count-candidates">0</span></button>
+        <button type="button" class="seg-btn" role="tab" aria-selected="false" data-seg-tab="accepted">Приняли меня <span class="seg-count" id="count-accepted">0</span></button>
+      </div>
+      <div class="seg-panel" data-seg-panel="candidates"><div id="contacts-list" class="list"></div></div>
+      <div class="seg-panel" data-seg-panel="accepted" hidden><div id="matches-list" class="list"></div></div>
     </section>
   </main>
 
@@ -409,6 +421,6 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
-  <script src="app.js?v=2026-10-19-3"></script>
+  <script src="app.js?v=2026-10-20-1"></script>
 </body>
 </html>

@@ -1454,11 +1454,18 @@ function setupLinks(s) {
 // ======================================================
 
 const SKILLS_MAX = 10;
-const SKILL_SUGGESTIONS = [
-  "Python", "JavaScript", "Backend", "Frontend", "Мобильная_разработка", "UX/UI", "Дизайн",
-  "Data_Science", "ML", "1С", "Маркетинг", "SMM", "Продажи", "B2B_продажи", "Финансы",
-  "Юриспруденция", "Операционка", "Управление_проектами", "Аналитика", "Контент",
+// Подсказки по группам (значения те же, что были в плоском списке)
+const SKILL_GROUPS = [
+  { title: "Разработка", tags: ["Python", "JavaScript", "Backend", "Frontend", "Мобильная_разработка", "1С"] },
+  { title: "Дизайн", tags: ["UX/UI", "Дизайн"] },
+  { title: "Данные и AI", tags: ["Data_Science", "ML", "Аналитика"] },
+  { title: "Маркетинг и продажи", tags: ["Маркетинг", "SMM", "Продажи", "B2B_продажи", "Контент"] },
+  { title: "Управление и финансы", tags: ["Финансы", "Юриспруденция", "Операционка", "Управление_проектами"] },
 ];
+const SKILL_SUGGESTIONS = SKILL_GROUPS.flatMap((g) => g.tags);
+const SKILL_LABELS = { "B2B_продажи": "B2B-продажи" };
+// Как тег выглядит в выборе: без «_» и без «#»
+const skillLabel = (tag) => SKILL_LABELS[tag] || String(tag).replace(/_/g, " ");
 
 const skillKey = (tag) => String(tag).toLowerCase().replace(/ё/g, "е").replace(/[-_]+/g, "_");
 
@@ -1482,17 +1489,19 @@ const skillMatchNote = (common, text = "Совпадений по навыкам
 
 // Выбор тегов. Значение хранится в скрытом поле name="skills" через запятую —
 // так теги попадают в черновик формы вместе с остальными полями.
-const SKILL_SUGGEST_SHORT = 8; // сначала — короткий список, остальные по кнопке «Ещё»
-
 function skillPickerHtml(placeholder = "Свой тег") {
   return `<div class="skill-picker" data-skill-picker>
     <input name="skills" hidden>
-    <div class="skill-tags" data-skill-selected></div>
+    <div class="skill-selected" data-skill-selected-wrap hidden>
+      <p class="skill-group-title">Выбрано</p>
+      <div class="skill-tags" data-skill-selected></div>
+    </div>
+    <div class="skill-groups" data-skill-suggest></div>
+    <p class="skill-group-title">Нет нужного? Добавьте свой</p>
     <div class="skill-add">
       <input class="skill-input input" type="text" maxlength="30" placeholder="${esc(placeholder)}" aria-label="Добавить свой тег">
       <button class="btn secondary small" type="button" data-skill-add-custom>Добавить</button>
     </div>
-    <div class="skill-tags" data-skill-suggest></div>
     <p class="hint" data-skill-hint>Нажмите на подходящие или впишите свой. До ${SKILLS_MAX} тегов.</p>
   </div>`;
 }
@@ -1527,15 +1536,20 @@ function setupSkillPicker(root) {
   function render() {
     const list = pickerValue(root);
     const keys = new Set(list.map(skillKey));
+    root.querySelector("[data-skill-selected-wrap]").hidden = list.length === 0;
     root.querySelector("[data-skill-selected]").innerHTML = list
-      .map((t, i) => `<button type="button" class="skill-chip on" data-skill-remove="${i}" aria-label="Убрать тег ${esc(t)}">#${esc(t)}</button>`)
+      .map((t, i) => `<button type="button" class="skill-chip on" data-skill-remove="${i}" aria-label="Убрать тег ${esc(skillLabel(t))}">${esc(skillLabel(t))}</button>`)
       .join("");
-    const rest = SKILL_SUGGESTIONS.filter((t) => !keys.has(skillKey(t)));
-    const shown = root._all ? rest : rest.slice(0, SKILL_SUGGEST_SHORT);
-    root.querySelector("[data-skill-suggest]").innerHTML = list.length >= SKILLS_MAX ? "" :
-      shown.map((t) => `<button type="button" class="skill-chip" data-skill-add="${esc(t)}">+ ${esc(t)}</button>`).join("") +
-      (rest.length > shown.length ? `<button type="button" class="text-btn skill-more" data-skill-more>Ещё ${rest.length - shown.length}…</button>` : "");
-    hint.textContent = `Нажмите на подходящие или впишите свой. До ${SKILLS_MAX} тегов.`;
+    const full = list.length >= SKILLS_MAX; // лимит: новые теги неактивны, выбранные можно убрать
+    root.querySelector("[data-skill-suggest]").innerHTML = SKILL_GROUPS.map((g) =>
+      `<div class="skill-group"><p class="skill-group-title">${esc(g.title)}</p><div class="skill-tags">${
+        g.tags.map((t) => keys.has(skillKey(t))
+          ? `<button type="button" class="skill-chip sel" data-skill-toggle="${esc(t)}" aria-pressed="true">✓ ${esc(skillLabel(t))}</button>`
+          : `<button type="button" class="skill-chip" data-skill-toggle="${esc(t)}" aria-pressed="false"${full ? " disabled" : ""}>+ ${esc(skillLabel(t))}</button>`
+        ).join("")}</div></div>`).join("");
+    hint.textContent = list.length
+      ? `Выбрано ${list.length} из ${SKILLS_MAX}. Можно вписать свой тег.`
+      : `Нажмите на подходящие или впишите свой. До ${SKILLS_MAX} тегов.`;
   }
   const addCustom = () => {
     // Можно вписать несколько через запятую: «Figma, Tilda»
@@ -1545,15 +1559,16 @@ function setupSkillPicker(root) {
   };
 
   root.addEventListener("click", (e) => {
-    const plus = e.target.closest("[data-skill-add]");
+    const toggle = e.target.closest("[data-skill-toggle]");
     const remove = e.target.closest("[data-skill-remove]");
-    if (plus) add(plus.dataset.skillAdd);
+    if (toggle) {
+      const key = skillKey(toggle.dataset.skillToggle);
+      const list = pickerValue(root);
+      if (list.some((t) => skillKey(t) === key)) set(list.filter((t) => skillKey(t) !== key));
+      else add(toggle.dataset.skillToggle);
+    }
     else if (remove) set(pickerValue(root).filter((_, i) => i !== Number(remove.dataset.skillRemove)));
     else if (e.target.closest("[data-skill-add-custom]")) addCustom();
-    else if (e.target.closest("[data-skill-more]")) {
-      root._all = true;
-      render();
-    }
   });
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === ",") {
@@ -2524,6 +2539,65 @@ function setupOfferForm() {
 // ОТКЛИКИ И ПРИГЛАШЕНИЯ
 // ======================================================
 
+// Переключатель-«сегмент» (Отклики | Приглашения, Мои кандидаты | Приняли меня)
+// и красивое пустое состояние с кнопкой действия.
+const EMPTY_ART = {
+  chat: `<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M9 10h30a3 3 0 0 1 3 3v17a3 3 0 0 1-3 3H21l-8 7v-7H9a3 3 0 0 1-3-3V13a3 3 0 0 1 3-3z"/><circle cx="16.5" cy="21.5" r="1.6"/><circle cx="24" cy="21.5" r="1.6"/><circle cx="31.5" cy="21.5" r="1.6"/></svg>`,
+  person: `<svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="22" cy="19" r="7"/><path d="M8 40a14 14 0 0 1 28 0"/></svg><b class="empty-check" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m6 12.5 4 4 8-9"/></svg></b>`,
+};
+
+function emptyCard(art, title, text, label, go) {
+  return `<div class="empty-card">
+    <div class="empty-art">${art}<i class="d1"></i><i class="d2"></i><i class="d3"></i></div>
+    <h3>${esc(title)}</h3>
+    <p>${esc(text)}</p>
+    <button class="btn primary" type="button" data-go="${go}">${esc(label)}</button>
+  </div>`;
+}
+
+// Куда ведут кнопки в пустых состояниях
+const EMPTY_GO = {
+  idea: () => { show("projects"); $("open-idea").click(); },
+  profile: () => show("profile"),
+  responses: () => show("responses"),
+  search: () => show("search"),
+};
+
+function setCount(id, n) {
+  const el = $(id);
+  if (el) el.textContent = String(n);
+}
+
+function setupSegments() {
+  document.addEventListener("click", (e) => {
+    const tab = e.target.closest("[data-seg-tab]");
+    if (tab) {
+      const seg = tab.closest(".seg");
+      const view = tab.closest(".view");
+      seg.querySelectorAll("[data-seg-tab]").forEach((b) => {
+        const on = b === tab;
+        b.classList.toggle("active", on);
+        b.setAttribute("aria-selected", String(on));
+      });
+      view.querySelectorAll("[data-seg-panel]").forEach((p) => (p.hidden = p.dataset.segPanel !== tab.dataset.segTab));
+      return;
+    }
+    const go = e.target.closest("[data-go]");
+    if (go && EMPTY_GO[go.dataset.go]) {
+      EMPTY_GO[go.dataset.go]();
+      return;
+    }
+    const more = e.target.closest("[data-safety-toggle]");
+    if (more) {
+      const box = more.closest(".safety-compact");
+      const full = box.querySelector(".safety-full");
+      full.hidden = !full.hidden;
+      more.textContent = full.hidden ? "Подробнее" : "Свернуть";
+      more.setAttribute("aria-expanded", String(!full.hidden));
+    }
+  });
+}
+
 async function loadResponses() {
   const offersEl = $("offers-list");
   const invitesEl = $("invites-list");
@@ -2533,8 +2607,12 @@ async function loadResponses() {
   try {
     const [{ offers }, { invites }] = await Promise.all([api("GET", "/api/offers/received"), api("GET", "/api/invites")]);
 
+    setCount("count-offers", offers.length);
+    setCount("count-invites", invites.length);
+
     if (offers.length === 0) {
-      empty(offersEl, "Откликов пока нет. Они появятся, когда кто-то откликнется на ваш опубликованный проект.");
+      offersEl.innerHTML = emptyCard(EMPTY_ART.chat, "Откликов пока нет",
+        "Они появятся здесь, когда кто-то откликнется на ваш опубликованный проект.", "Опубликовать проект", "idea");
     } else {
       offersEl.innerHTML = offers.map((o) => {
         const st = OFFER_STATUS[o.status] || { text: o.status, tone: "gray" };
@@ -2555,7 +2633,8 @@ async function loadResponses() {
     }
 
     if (invites.length === 0) {
-      empty(invitesEl, "Приглашений пока нет. Откройте профиль для основателей во вкладке «Профиль», чтобы они могли вас найти.");
+      invitesEl.innerHTML = emptyCard(EMPTY_ART.person, "Приглашений пока нет",
+        "Откройте профиль для основателей во вкладке «Профиль», чтобы они могли вас найти.", "Открыть профиль", "profile");
     } else {
       invitesEl.innerHTML = invites.map((s) => projectForCandidate(s, null)).join("");
     }
@@ -2644,7 +2723,11 @@ async function loadContacts() {
   try {
     const [{ contacts }, { matches }] = await Promise.all([api("GET", "/api/contacts"), api("GET", "/api/matches")]);
 
-    if (contacts.length === 0) empty(contactsEl, "Здесь появятся кандидаты, чьи отклики вы примете.");
+    setCount("count-candidates", contacts.length);
+    setCount("count-accepted", matches.length);
+
+    if (contacts.length === 0) contactsEl.innerHTML = emptyCard(EMPTY_ART.person, "Кандидатов пока нет",
+      "Здесь появятся кандидаты, чьи отклики вы примете.", "Перейти к откликам", "responses");
     else contactsEl.innerHTML = contacts.map((c) => `<article class="card">
         <div class="chips">${badge("MATCH", "green")} ${badge(c.type, "gray")} ${demoBadge(c.candidate_id)}</div>
         <div class="person">${avatarHtml(c.candidate_avatar_url, c.candidate_name)}
@@ -2656,7 +2739,8 @@ async function loadContacts() {
         <div class="card-foot">${reportButton("user", c.candidate_id, c.candidate_name || "пользователь MAX")}</div>
       </article>`).join("");
 
-    if (matches.length === 0) empty(matchesEl, "Здесь появятся проекты, основатели которых приняли ваш отклик.");
+    if (matches.length === 0) matchesEl.innerHTML = emptyCard(EMPTY_ART.chat, "Проектов пока нет",
+      "Здесь появятся проекты, основатели которых приняли ваш отклик.", "Найти проекты", "search");
     else matchesEl.innerHTML = matches.map((m) => `<article class="card">
         <div class="chips">${badge("MATCH", "green")} ${badge(m.type, "gray")} ${demoBadge(m.founder_id)}</div>
         <h3>${esc(m.startup_name)}</h3>
@@ -2788,6 +2872,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   setupSideMenu();
   setupNavigation();
+  setupSegments();
   setupStart();
   document.addEventListener("click", openExternal);
   setupIdeaForm();
