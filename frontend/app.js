@@ -2569,11 +2569,23 @@ function setSegCount(name, n) {
   if (el) el.textContent = String(n);
 }
 
+// Пустая первая вкладка, а во второй что-то есть (кандидат с MATCH, приглашения без откликов) —
+// открываем вторую. Если человек уже сам переключал вкладки, его выбор не трогаем.
+function autoPickSeg(first, firstCount, second, secondCount) {
+  const btn = document.querySelector(`[data-seg="${second}"]`);
+  const seg = btn && btn.closest(".seg");
+  if (!seg || seg.dataset.touched) return;
+  const want = firstCount === 0 && secondCount > 0 ? second : first;
+  const target = seg.querySelector(`[data-seg="${want}"]`);
+  if (target && !target.classList.contains("active")) target.click();
+}
+
 function setupNewUi() {
   document.querySelectorAll(".seg").forEach((seg) => {
     seg.addEventListener("click", (e) => {
       const btn = e.target.closest("[data-seg]");
       if (!btn) return;
+      if (e.isTrusted) seg.dataset.touched = "1"; // переключил сам человек, а не autoPickSeg
       seg.querySelectorAll("[data-seg]").forEach((b) => {
         b.classList.toggle("active", b === btn);
         b.setAttribute("aria-selected", String(b === btn));
@@ -2605,6 +2617,7 @@ async function loadResponses() {
     const [{ offers = [] }, { invites = [] }] = await Promise.all([api("GET", "/api/offers/received"), api("GET", "/api/invites")]);
     setSegCount("offers", offers.length);
     setSegCount("invites", invites.length);
+    autoPickSeg("offers", offers.length, "invites", invites.length);
 
     if (offers.length === 0) {
       emptyCard(offersEl, EMPTY_STATES.offers);
@@ -2718,6 +2731,7 @@ async function loadContacts() {
     const [{ contacts = [] }, { matches = [] }] = await Promise.all([api("GET", "/api/contacts"), api("GET", "/api/matches")]);
     setSegCount("contacts", contacts.length);
     setSegCount("matches", matches.length);
+    autoPickSeg("contacts", contacts.length, "matches", matches.length);
 
     if (contacts.length === 0) emptyCard(contactsEl, EMPTY_STATES.contacts);
     else contactsEl.innerHTML = contacts.map((c) => `<article class="card">
