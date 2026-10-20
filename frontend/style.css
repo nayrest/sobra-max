@@ -940,3 +940,20 @@ body.premium-open .content { padding-bottom: calc(var(--sheet-h, 360px) + var(--
 .cand-actions .btn { width: 100%; }
 @media (max-width: 420px) { .cand-cols { grid-template-columns: 1fr; } }
 /* PREMIUM-END */
+
+/* NAV-CYCLE-START — «Как работает SOBRA» в меню ПК сворачивается (по макету Артемия) */
+@media (min-width: 900px) {
+  .nav-cycle { margin-top: 22px; padding: 0; background: #f3f5fd; border: 1px solid #e7ebfa; border-radius: 16px; }
+  .nav-cycle summary { list-style: none; display: flex; align-items: center; gap: 12px; padding: 14px; cursor: pointer; border-radius: 16px; }
+  .nav-cycle summary::-webkit-details-marker { display: none; }
+  .nav-cycle summary:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+  .nav-cycle-ico { flex: 0 0 auto; width: 30px; height: 30px; display: grid; place-items: center; color: #6a6fa8; }
+  .nav-cycle-ico svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .nav-cycle-text { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
+  .nav-cycle-text b { font-size: 14px; color: var(--ink); }
+  .nav-cycle-text small { font-size: 12.5px; line-height: 1.3; color: var(--muted); }
+  .nav-cycle-chev { flex: 0 0 auto; width: 8px; height: 8px; margin-right: 4px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); transition: transform 0.15s ease; }
+  .nav-cycle[open] .nav-cycle-chev { transform: rotate(-135deg); }
+  .nav-cycle ol { margin: 0; padding: 0 14px 14px 36px; }
+}
+/* NAV-CYCLE-END */
