@@ -271,5 +271,10 @@ else:
     check("«ищу co-founder'а» → wants_partner = true", s == 200 and af["fields"].get("wants_partner") is True, (s, af))
     s, af = call("POST", "/api/startups/autofill", SK_F, {"description": "Хочу проверить идею обмена учебниками, первокурсники тратят на них много денег."})
     check("без поиска людей → wants_partner = false", s == 200 and af["fields"].get("wants_partner") is False, (s, af))
+    s, af = call("POST", "/api/startups/autofill", SK_F, {"description": "Сервис обмена учебниками между студентами. Ищу технического сооснователя: backend-разработчика на Python или JavaScript, который сделает MVP."})
+    f = af.get("fields", {}) if s == 200 else {}
+    check("«ищу сооснователя» → «Кого ищете в команду» заполнено", s == 200 and bool(f.get("partner_needed")), (s, af))
+    check("«ищу сооснователя» → «Команда / co-founder»", f.get("seeking") == "Команда / co-founder", f)
+    check("теги из фразы: Python, JavaScript, Backend", set(f.get("skills", [])) >= {"Python", "JavaScript", "Backend"}, f)
 
 print(f"\nИтого: {ok_count} OK, {fail_count} FAIL")

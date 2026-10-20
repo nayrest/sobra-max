@@ -23,9 +23,10 @@ const SYSTEM_PROMPT = `Ты помогаешь начинающему предп
 - seeking — строго "Команда / co-founder" (нужен человек в команду) или "Партнёрство" (нужно сотрудничество с другой компанией или специалистом). Если не ясно — "Команда / co-founder".
 - name — короткое рабочее название проекта, до 5 слов.
 - wants_partner — true, если автор прямо пишет, что ищет партнёра, co-founder'а или людей в команду; иначе false.
+- Если wants_partner = true, partner_needed обязательно заполни: кого ищут и для чего — словами автора (роль, навыки, задачи). Не оставляй его пустым.
 
 Ответь строго JSON-объектом без пояснений вокруг:
-{"name": "", "category": "", "market_type": "", "stage": "", "seeking": "", "customer": "", "problem": "", "solution": "", "competitors": "", "traction": "", "business_model": "", "economics": "", "partner_needed": "", "wants_partner": false}`;
+{"name": "", "category": "", "market_type": "", "stage": "", "seeking": "", "customer": "", "problem": "", "solution": "", "competitors": "", "traction": "", "business_model": "", "economics": "", "wants_partner": false, "partner_needed": ""}`;
 
 const TEXT_FIELDS = ["customer", "problem", "solution", "competitors", "traction", "business_model", "economics", "partner_needed"];
 const FIELD_MAX = 1000;
@@ -41,6 +42,44 @@ function pick(value, allowed, fallback) {
 
 // Запасная проверка, если модель не вернула wants_partner: «ищу co-founder'а», «нужен маркетолог в команду»
 const SEEK_WORDS = /(ищу|ищем|ищет|в\s+поиск|зову|приглаша)[^.!?]{0,80}(co-?founder|кофаундер|сооснова|партн[её]р|в\s+команд|разработчик|программист|маркетолог|дизайнер|продаж|людей|специалист)|нуж(ен|на|ны)\s+(co-?founder|кофаундер|сооснова|партн[её]р|разработчик|программист|маркетолог|дизайнер|люди\s+в\s+команд)/i;
+
+// Фраза, где автор говорит, кого ищет: «Ищу технического сооснователя: backend-разработчика…».
+// Нужна как запасной вариант, если ИИ оставил partner_needed пустым, — берём слова автора как есть.
+function seekingSentence(description) {
+  const sentences = String(description || "").replace(/\s+/g, " ").split(/(?<=[.!?])\s+/);
+  const found = sentences.find((s) => SEEK_WORDS.test(s) || /co-?founder|кофаундер|сооснователь/i.test(s));
+  return found ? found.trim().slice(0, FIELD_MAX) : "";
+}
+
+// Теги навыков, которые нужны партнёру, — только по тексту о том, кого ищут (не по всему описанию:
+// «зарабатываем на продвижении» не значит, что нужен маркетолог). Названия — как в подсказках формы.
+const SKILL_PATTERNS = [
+  ["Python", /python|питон/i],
+  ["JavaScript", /javascript|\bjs\b|node\.?js|typescript/i],
+  ["Backend", /backend|бэкенд|бекенд|бэк-?энд|серверн/i],
+  ["Frontend", /frontend|фронтенд|фронт-?энд|вёрстк|верстк/i],
+  ["Мобильная_разработка", /мобильн\w* (приложени|разработ)|android|\bios\b/i],
+  ["1С", /\b1[сc]\b/i],
+  ["UX/UI", /\bux\b|\bui\b|интерфейс/i],
+  ["Дизайн", /дизайн/i],
+  ["Data_Science", /data ?science|дата-?сайен/i],
+  ["ML", /\bml\b|машинн\w* обучен|нейросет/i],
+  ["Аналитика", /аналитик|аналитич/i],
+  ["Маркетинг", /маркетинг|маркетолог/i],
+  ["SMM", /\bsmm\b|соцсет/i],
+  ["B2B-продажи", /b2b/i],
+  ["Продажи", /продаж|sales/i],
+  ["Контент", /контент|копирайт/i],
+  ["Финансы", /финанс|бухгалт/i],
+  ["Юриспруденция", /юрист|юридич/i],
+  ["Операционка", /операцион/i],
+  ["Управление_проектами", /управлени\w* проект|project manag|проджект/i],
+];
+
+function skillsFromText(text) {
+  const t = String(text || "");
+  return SKILL_PATTERNS.filter(([, re]) => re.test(t)).map(([tag]) => tag).slice(0, 5);
+}
 
 function mentionsPartner(description) {
   const text = String(description || "");
@@ -75,11 +114,19 @@ async function autofillIdea(description, dictionaries) {
   const system = SYSTEM_PROMPT
     .replace("{CATEGORIES}", dictionaries.categories.map((c) => `"${c}"`).join(", "))
     .replace("{STAGES}", dictionaries.stages.map((s) => `"${s}"`).join(", "));
-  const text = await ai.callWithRetry(`Описание идеи:\n${description}`, system, { maxTokens: 1200, temperature: 0.2 });
+  const text = await ai.callWithRetry(`Описание идеи:\n${description}`, system, { maxTokens: 2000, temperature: 0.2 });
   const fields = parseFields(text, dictionaries);
   // Модель может ответить false на «MVP делаю сам, ищу co-founder'а» — слова в описании важнее
   if (!fields.wants_partner && mentionsPartner(description)) fields.wants_partner = true;
+  // Модель иногда оставляет «Кого ищете в команду» пустым, хотя автор прямо написал — подставляем его слова
+  const sentence = seekingSentence(description);
+  // «Ищу сооснователя / co-founder'а / человека в команду» — это команда, а не партнёрство между компаниями
+  const team = dictionaries.seekingValues.find((v) => /co-?founder|команд/i.test(v));
+  if (team && /co-?founder|кофаундер|ко-фаундер|сооснова|в\s+команд/i.test(sentence)) fields.seeking = team;
+  if (!fields.partner_needed && sentence) fields.partner_needed = sentence;
+  // Теги нужных навыков — по тексту о том, кого ищут
+  fields.skills = fields.wants_partner ? skillsFromText(`${sentence} ${fields.partner_needed}`) : [];
   return fields;
 }
 
-module.exports = { autofillIdea, parseFields, mentionsPartner };
+module.exports = { autofillIdea, parseFields, mentionsPartner, seekingSentence, skillsFromText };

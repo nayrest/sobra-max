@@ -884,6 +884,13 @@ function setupIdeaForm() {
           setTimeout(() => wrapper.classList.remove("autofilled"), 2500);
         }
       }
+      // Теги нужных навыков из фразы «ищу …» — только если человек ещё не выбрал свои
+      const picker = $("idea-skills-field")?.querySelector("[data-skill-picker]");
+      if (picker && Array.isArray(fields.skills) && fields.skills.length && !pickerValue(picker).length) {
+        setSkills(picker, fields.skills);
+        $("idea-skills-field").classList.add("autofilled");
+        setTimeout(() => $("idea-skills-field").classList.remove("autofilled"), 2500);
+      }
       saveDraft();
       if (wizard.on) {
         toast(partnerTurnedOn
