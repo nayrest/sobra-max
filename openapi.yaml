@@ -870,7 +870,7 @@ paths:
               required: [event]
               properties:
                 event: { type: string, enum: [shown, click, dismiss] }
-                source: { type: string, enum: [match, profile, plans], default: match }
+                source: { type: string, enum: [match, profile, plans, popup], default: match }
       responses:
         "200":
           description: Записано

@@ -113,7 +113,8 @@ const state = {
   lastSearchGoal: null,
   lastUpdate: null, // результат последнего шага Update: показываем баннер «было → стало»
   intent: null, // с чем пришёл: idea — только проверить идею, partner — найти партнёра, join — присоединиться
-  pro: { clicked: false, dismissed: false }, // SOBRA Pro: нажал «Оформить подписку» / «Продолжить бесплатно»
+  pro: { clicked: false, dismissed: false }, // SOBRA AI Premium: нажал «Оформить Premium» / закрыл предложение
+  premiumSheetShown: false, // всплывающая панель Premium уже была в этой сессии
 };
 
 // ======================================================
@@ -413,6 +414,7 @@ function show(view) {
   }
   if (BADGE_SECTIONS[view]) markSeen(view);
   else refreshCounters();
+  if (view !== "match") closePremiumSheet();
   document.querySelectorAll(".view").forEach((v) => (v.hidden = true));
   $(`view-${view}`).hidden = false;
 
@@ -1731,42 +1733,66 @@ function editBlock(startup, blockId) {
 }
 
 // ======================================================
-// SOBRA PRO — «Оформить подписку»
+// SOBRA AI PREMIUM — «Оформить Premium»
 // Оплаты пока нет: кнопка честно говорит, что подписка появится после запуска,
 // и считает, сколько людей хотят её оформить (POST /api/pro/event). Бесплатное ничем не ограничиваем.
-// Показываем после бесплатного подбора — человек уже увидел, как работает AI Match.
+// После бесплатного подбора — человек уже увидел, как работает AI Match, — один раз всплывает панель снизу.
 // ======================================================
 
-const PRO_THANKS = "✓ Спасибо! Оформить подписку можно будет после запуска — мы отметили ваш интерес и сообщим первыми. Всё, чем вы пользуетесь сейчас, остаётся бесплатным.";
+const PREMIUM_THANKS = "✓ Спасибо! Оформить Premium можно будет после запуска — мы отметили ваш интерес и сообщим первыми. Всё, чем вы пользуетесь сейчас, остаётся бесплатным.";
+const PREMIUM_DELAY_MS = 3500;
+const CROWN_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8l4.5 3.5L12 5l4.5 6.5L21 8l-2 10H5z"/></svg>`;
+let premiumTimer = null;
 
-function proCardHtml(source) {
-  return `<section class="card pro-card" data-pro-card="${source}">
-    <div class="pro-head">
-      <span class="pro-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6L3.3 9.3l6.1-.7z"/></svg></span>
-      <div class="grow"><p class="eyebrow">SOBRA Pro · 1 990 ₽/год</p><h3>Найдите команду быстрее</h3></div>
-    </div>
-    <p class="muted">Подбор под задачи проекта, более точные рекомендации и уведомления, когда появятся подходящие специалисты.</p>
-    ${state.pro.clicked
-      ? `<p class="pro-thanks">${PRO_THANKS}</p>`
-      : `<div class="actions pro-actions">
-          <button class="btn primary" type="button" data-pro-action="click">Оформить подписку</button>
-          <button class="btn secondary" type="button" data-pro-go="plans">Сравнить тарифы</button>
-        </div>
-        <button class="text-btn pro-skip" type="button" data-pro-action="dismiss">Продолжить бесплатно</button>`}
-  </section>`;
-}
+const proLog = (event, source) => api("POST", "/api/pro/event", { event, source }).catch(() => {}); // статистика не должна мешать
 
-// Кнопка на странице «Тарифы» — под карточкой SOBRA Pro
+// Кнопка на странице «Тарифы» — под карточкой Premium
 function renderPlansPro() {
   const box = $("plans-pro-actions");
   if (!box) return;
   box.innerHTML = state.pro.clicked
-    ? `<p class="pro-thanks">${PRO_THANKS}</p>`
-    : `<button class="btn primary block" type="button" data-pro-action="click" data-pro-source="plans">Оформить подписку</button>`;
+    ? `<p class="pro-thanks">${PREMIUM_THANKS}</p>`
+    : `<button class="btn premium-btn block" type="button" data-pro-action="click" data-pro-source="plans">Оформить Premium <span aria-hidden="true">→</span></button>`;
 }
 
-const proLog = (event, source) => api("POST", "/api/pro/event", { event, source }).catch(() => {}); // статистика не должна мешать
-const proShown = (source) => { if (document.querySelector(`[data-pro-card="${source}"]`)) proLog("shown", source); };
+function closePremiumSheet() {
+  clearTimeout(premiumTimer);
+  const sheet = $("premium-sheet");
+  if (sheet) sheet.remove();
+  document.body.classList.remove("premium-open");
+}
+
+function schedulePremiumSheet() {
+  clearTimeout(premiumTimer);
+  if (state.pro.clicked || state.pro.dismissed || state.premiumSheetShown) return;
+  premiumTimer = setTimeout(() => {
+    if ($("view-match").hidden || state.pro.clicked || state.pro.dismissed) return; // ушёл с подбора — не догоняем
+    state.premiumSheetShown = true; // в этой сессии больше не всплывает
+    const sheet = document.createElement("section");
+    sheet.id = "premium-sheet";
+    sheet.className = "premium-sheet";
+    sheet.setAttribute("role", "dialog");
+    sheet.setAttribute("aria-label", "SOBRA AI Premium");
+    sheet.innerHTML = `
+      <button class="premium-close" type="button" data-pro-action="dismiss" data-pro-source="popup" aria-label="Закрыть">×</button>
+      <div class="pro-head">
+        <span class="pro-icon">${CROWN_SVG}</span>
+        <div class="grow"><p class="eyebrow">SOBRA AI Premium · 1 990 ₽/год</p><h3>Найдите команду быстрее</h3></div>
+      </div>
+      <p class="muted">Расширенный подбор под роли и задачи проекта, фильтры по навыкам и уведомления о новых подходящих кандидатах.</p>
+      <div class="actions pro-actions">
+        <button class="btn premium-btn" type="button" data-pro-action="click" data-pro-source="popup">Оформить Premium</button>
+        <button class="btn secondary" type="button" data-pro-go="plans">Сравнить тарифы</button>
+      </div>
+      <button class="text-btn pro-skip" type="button" data-pro-action="dismiss" data-pro-source="popup">Продолжить бесплатно</button>`;
+    document.body.appendChild(sheet);
+    // Место под панелью, чтобы последнюю карточку можно было докрутить выше неё
+    document.body.style.setProperty("--sheet-h", `${sheet.offsetHeight}px`);
+    document.body.classList.add("premium-open");
+    requestAnimationFrame(() => sheet.classList.add("open"));
+    proLog("shown", "popup");
+  }, PREMIUM_DELAY_MS);
+}
 
 function setupPro() {
   $("plans-back").addEventListener("click", () => show(state.plansFrom && state.plansFrom !== "plans" ? state.plansFrom : "profile"));
@@ -1775,24 +1801,24 @@ function setupPro() {
       // «Тарифы» не в меню: открываются из ИИ-подбора и из профиля, «← Назад» возвращает туда же
       const from = document.querySelector(".view:not([hidden])");
       state.plansFrom = from ? from.id.replace(/^view-/, "") : "profile";
+      closePremiumSheet();
       show("plans");
       return;
     }
     const button = e.target.closest("[data-pro-action]");
     if (!button) return;
-    const card = button.closest("[data-pro-card]");
-    const source = button.dataset.proSource || (card && card.dataset.proCard) || "match";
+    const source = button.dataset.proSource || "plans";
     if (button.dataset.proAction === "click") {
       state.pro.clicked = true;
       proLog("click", source);
-      document.querySelectorAll("[data-pro-card] .pro-actions").forEach((el) => (el.outerHTML = `<p class="pro-thanks">${PRO_THANKS}</p>`));
-      document.querySelectorAll("[data-pro-card] .pro-skip").forEach((el) => el.remove());
+      const sheet = $("premium-sheet");
+      if (sheet) sheet.querySelector(".pro-actions").outerHTML = `<p class="pro-thanks">${PREMIUM_THANKS}</p>`, sheet.querySelector(".pro-skip")?.remove();
       renderPlansPro();
     } else {
       state.pro.dismissed = true;
       proLog("dismiss", source);
-      if (card) card.remove();
-      toast("Продолжаем бесплатно. Тарифы можно посмотреть в профиле.");
+      closePremiumSheet();
+      if (button.classList.contains("pro-skip")) toast("Продолжаем бесплатно. Тарифы можно посмотреть в профиле.");
     }
   });
 }
@@ -1801,8 +1827,98 @@ function setupPro() {
 // ОСНОВАТЕЛЬ: ПОДБОР ПАРТНЁРА
 // ======================================================
 
+// Карточка кандидата (макет Артемия): процент в углу, «Рекомендации ИИ», «Сильные стороны / Что уточнить».
+// Отдельного текста рекомендации ИИ не пишет — берём главный довод, остальные идут в «Сильные стороны».
+const TECH_TAGS = new Set(["Разработка", "Данные и AI"].flatMap((t) => (SKILL_GROUPS.find((g) => g.title === t) || { tags: [] }).tags).map((t) => skillKey(cleanSkill(t))));
+const MARKETING_TAGS = new Set(((SKILL_GROUPS.find((g) => g.title === "Маркетинг и продажи") || { tags: [] }).tags).map((t) => skillKey(cleanSkill(t))));
+const hasTagFrom = (skills, set) => (Array.isArray(skills) ? skills : []).some((t) => set.has(skillKey(t)));
+
+const MATCH_FILTERS = [
+  { id: "all", label: "Все", test: () => true },
+  { id: "strong", label: "Сильные соответствия", dot: "green", test: (c) => c.ai?.verdict === "strong" },
+  { id: "partial", label: "Частичное", dot: "amber", test: (c) => c.ai?.verdict === "partial" },
+  { id: "tech", label: "Технические", test: (c) => hasTagFrom(c.skills, TECH_TAGS) },
+  { id: "marketing", label: "Маркетинг", test: (c) => hasTagFrom(c.skills, MARKETING_TAGS) },
+];
+
+const shortList = (items, n = 3) => (Array.isArray(items) ? items : []).filter(Boolean).slice(0, n);
+const bullets = (items) => `<ul>${items.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>`;
+
+function candidateCard(c) {
+  const ai = c.ai;
+  const v = ai ? AI_VERDICTS[ai.verdict] || AI_VERDICTS.partial : null;
+  const reasons = shortList(ai?.reasons, 4);
+  const recommendation = reasons[0] || (ai ? `${v.text} потребности проекта.` : "");
+  let strengths = reasons.slice(1, 4);
+  if (strengths.length === 0 && Array.isArray(c.skills_common) && c.skills_common.length) {
+    strengths = [`Совпадают навыки: ${c.skills_common.map((t) => skillLabel(t)).join(", ")}`];
+  }
+  const ask = shortList([...(ai?.missing || []), ...(ai?.clarify || [])], 3);
+  const hit = new Set((c.skills_common || []).map(skillKey));
+  const tags = (Array.isArray(c.skills) ? c.skills : []).slice(0, 5);
+  return `<article class="card cand-card" data-filter-tags="${MATCH_FILTERS.filter((f) => f.test(c)).map((f) => f.id).join(" ")}">
+    <div class="cand-top">
+      ${avatarHtml(c.avatar_url, c.name)}
+      <div class="grow">
+        <h3>${esc(c.name)}</h3>
+        <p class="muted">${esc(GOALS[c.goal] || "")}</p>
+        <div class="chips">${demoBadge(c.user_id)} ${verifiedBadge(c.phone_verified)}</div>
+      </div>
+      ${ai ? `<div class="cand-score ${v.cls}"><b>${ai.score}%</b><span>Совпадение</span></div>` : ""}
+    </div>
+    ${tags.length ? `<div class="cand-tags">${tags.map((t) => `<span class="cand-tag${hit.has(skillKey(t)) ? " match" : ""}">${esc(skillLabel(t))}</span>`).join("")}</div>` : ""}
+    ${recommendation ? `<div class="cand-reco"><p class="cand-reco-title">✦ Рекомендации ИИ</p><p>${esc(recommendation)}</p></div>` : ""}
+    ${strengths.length || ask.length ? `<div class="cand-cols">
+      <div class="cand-col good"><p class="cand-col-title">Сильные стороны</p>${strengths.length ? bullets(strengths) : `<p class="muted">ИИ не выделил отдельно — смотрите описание.</p>`}</div>
+      <div class="cand-col ask"><p class="cand-col-title">Что уточнить</p>${ask.length ? bullets(ask) : `<p class="muted">Ничего важного — можно знакомиться.</p>`}</div>
+    </div>` : ""}
+    <div class="cand-more" hidden>
+      <p class="cand-col-title">О себе</p>
+      <p class="answer">${esc(c.about)}</p>
+      ${ai ? `<p class="ai-note">Оценка ИИ по текстам профиля и проекта. Проверьте детали при знакомстве.</p>` : ""}
+    </div>
+    ${isDemoId(c.user_id) && !c.invited ? `<p class="muted demo-note">Демо-кандидат: на приглашение он откликнется автоматически через несколько секунд.</p>` : ""}
+    <div class="actions cand-actions">
+      ${c.invited
+        ? `<button class="btn secondary" type="button" disabled>Приглашение отправлено ✓</button>`
+        : `<button class="btn primary" type="button" data-invite="${c.user_id}" ${isDemoId(c.user_id) ? "data-demo" : ""}>Пригласить</button>`}
+      <button class="btn secondary" type="button" data-cand-more>Подробнее ›</button>
+    </div>
+    <div class="card-foot">${reportButton("user", c.user_id, c.name)}</div>
+  </article>`;
+}
+
+function matchFiltersHtml(candidates) {
+  return `<div class="cand-filters" role="tablist">${MATCH_FILTERS.map((f) => {
+    const n = candidates.filter(f.test).length;
+    if (f.id !== "all" && n === 0) return "";
+    return `<button type="button" class="cand-filter${f.id === "all" ? " active" : ""}" data-cand-filter="${f.id}">${f.dot ? `<i class="dot ${f.dot}"></i>` : ""}${esc(f.label)} (${n})</button>`;
+  }).join("")}</div>`;
+}
+
+function setupCandidateCards() {
+  $("match-list").addEventListener("click", (e) => {
+    const more = e.target.closest("[data-cand-more]");
+    if (more) {
+      const box = more.closest(".cand-card").querySelector(".cand-more");
+      box.hidden = !box.hidden;
+      more.textContent = box.hidden ? "Подробнее ›" : "Свернуть";
+      return;
+    }
+    const f = e.target.closest("[data-cand-filter]");
+    if (f) {
+      const list = $("match-list");
+      list.querySelectorAll("[data-cand-filter]").forEach((b) => b.classList.toggle("active", b === f));
+      list.querySelectorAll(".cand-card").forEach((card) => {
+        card.hidden = !card.dataset.filterTags.split(" ").includes(f.dataset.candFilter);
+      });
+    }
+  });
+}
+
 async function loadCandidates(id) {
   const list = $("match-list");
+  closePremiumSheet();
   loading(list, "ИИ сравнивает кандидатов с потребностью проекта. Это займёт несколько секунд…");
   try {
     const { candidates, ai } = await api("GET", `/api/startups/${id}/candidates`);
@@ -1810,26 +1926,8 @@ async function loadCandidates(id) {
       empty(list, "Пока нет кандидатов, которые открыли профиль под такую потребность. Мы сообщим, когда они появятся — а пока проект видят в поиске.");
       return;
     }
-    list.innerHTML = aiNotice(ai, "") + candidates.map((c) => `
-      <article class="card">
-        <div class="person">
-          ${avatarHtml(c.avatar_url, c.name)}
-          <div class="grow"><h3>${esc(c.name)}</h3><p class="muted">${esc(GOALS[c.goal] || "")}</p>
-            <div class="chips">${demoBadge(c.user_id)} ${verifiedBadge(c.phone_verified)}</div></div>
-        </div>
-        <p class="answer">${esc(c.about)}</p>
-        ${skillTags(c.skills, c.skills_common)}
-        ${skillMatchNote(c.skills_common)}
-        ${renderAi(c.ai)}
-        ${isDemoId(c.user_id) && !c.invited ? `<p class="muted demo-note">Демо-кандидат: на приглашение он откликнется автоматически через несколько секунд.</p>` : ""}
-        <div class="actions">
-          ${c.invited
-            ? `<button class="btn secondary" type="button" disabled>Приглашение отправлено ✓</button>`
-            : `<button class="btn primary" type="button" data-invite="${c.user_id}" ${isDemoId(c.user_id) ? "data-demo" : ""}>Пригласить в проект</button>`}
-        </div>
-        <div class="card-foot">${reportButton("user", c.user_id, c.name)}</div>
-      </article>`).join("") + (state.pro.dismissed ? "" : proCardHtml("match"));
-    proShown("match");
+    list.innerHTML = aiNotice(ai, "") + matchFiltersHtml(candidates) + candidates.map(candidateCard).join("");
+    schedulePremiumSheet();
   } catch (error) {
     failed(list, error, () => loadCandidates(id));
   }
@@ -2959,6 +3057,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupOfferForm();
   setupNewUi();
   setupPro();
+  setupCandidateCards();
 
   $("projects-list").addEventListener("click", (e) => {
     const target = e.target.closest("[data-open]");
