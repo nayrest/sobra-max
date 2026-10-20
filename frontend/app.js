@@ -113,6 +113,8 @@ const state = {
   lastSearchGoal: null,
   lastUpdate: null, // результат последнего шага Update: показываем баннер «было → стало»
   intent: null, // с чем пришёл: idea — только проверить идею, partner — найти партнёра, join — присоединиться
+  pro: { clicked: false, dismissed: false }, // SOBRA AI Premium: нажал «Оформить Premium» / закрыл предложение
+  premiumSheetShown: false, // всплывающая панель Premium уже была в этой сессии
 };
 
 // ======================================================
@@ -412,6 +414,7 @@ function show(view) {
   }
   if (BADGE_SECTIONS[view]) markSeen(view);
   else refreshCounters();
+  if (view !== "match") closePremiumSheet();
   document.querySelectorAll(".view").forEach((v) => (v.hidden = true));
   $(`view-${view}`).hidden = false;
 
@@ -1733,6 +1736,97 @@ function editBlock(startup, blockId) {
 }
 
 // ======================================================
+// SOBRA AI PREMIUM — «Оформить Premium»
+// Оплаты пока нет: кнопка честно говорит, что подписка появится после запуска,
+// и считает, сколько людей хотят её оформить (POST /api/pro/event). Бесплатное ничем не ограничиваем.
+// После бесплатного подбора — человек уже увидел, как работает AI Match, — один раз всплывает панель снизу.
+// ======================================================
+
+const PREMIUM_THANKS = "✓ Спасибо! Оформить Premium можно будет после запуска — мы отметили ваш интерес и сообщим первыми. Всё, чем вы пользуетесь сейчас, остаётся бесплатным.";
+const PREMIUM_DELAY_MS = 3500;
+const CROWN_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8l4.5 3.5L12 5l4.5 6.5L21 8l-2 10H5z"/></svg>`;
+let premiumTimer = null;
+
+const proLog = (event, source) => api("POST", "/api/pro/event", { event, source }).catch(() => {}); // статистика не должна мешать
+
+// Кнопка на странице «Тарифы» — под карточкой Premium
+function renderPlansPro() {
+  const box = $("plans-pro-actions");
+  if (!box) return;
+  box.innerHTML = state.pro.clicked
+    ? `<p class="pro-thanks">${PREMIUM_THANKS}</p>`
+    : `<button class="btn premium-btn block" type="button" data-pro-action="click" data-pro-source="plans">Оформить Premium <span aria-hidden="true">→</span></button>`;
+}
+
+function closePremiumSheet() {
+  clearTimeout(premiumTimer);
+  const sheet = $("premium-sheet");
+  if (sheet) sheet.remove();
+  document.body.classList.remove("premium-open");
+}
+
+function schedulePremiumSheet() {
+  clearTimeout(premiumTimer);
+  if (state.pro.clicked || state.pro.dismissed || state.premiumSheetShown) return;
+  premiumTimer = setTimeout(() => {
+    if ($("view-match").hidden || state.pro.clicked || state.pro.dismissed) return; // ушёл с подбора — не догоняем
+    state.premiumSheetShown = true; // в этой сессии больше не всплывает
+    const sheet = document.createElement("section");
+    sheet.id = "premium-sheet";
+    sheet.className = "premium-sheet";
+    sheet.setAttribute("role", "dialog");
+    sheet.setAttribute("aria-label", "SOBRA AI Premium");
+    sheet.innerHTML = `
+      <button class="premium-close" type="button" data-pro-action="dismiss" data-pro-source="popup" aria-label="Закрыть">×</button>
+      <div class="pro-head">
+        <span class="pro-icon">${CROWN_SVG}</span>
+        <div class="grow"><p class="eyebrow">SOBRA AI Premium · 1 990 ₽/год</p><h3>Найдите команду быстрее</h3></div>
+      </div>
+      <p class="muted">Расширенный подбор под роли и задачи проекта, фильтры по навыкам и уведомления о новых подходящих кандидатах.</p>
+      <div class="actions pro-actions">
+        <button class="btn premium-btn" type="button" data-pro-action="click" data-pro-source="popup">Оформить Premium</button>
+        <button class="btn secondary" type="button" data-pro-go="plans">Сравнить тарифы</button>
+      </div>
+      <button class="text-btn pro-skip" type="button" data-pro-action="dismiss" data-pro-source="popup">Продолжить бесплатно</button>`;
+    document.body.appendChild(sheet);
+    // Место под панелью, чтобы последнюю карточку можно было докрутить выше неё
+    document.body.style.setProperty("--sheet-h", `${sheet.offsetHeight}px`);
+    document.body.classList.add("premium-open");
+    requestAnimationFrame(() => sheet.classList.add("open"));
+    proLog("shown", "popup");
+  }, PREMIUM_DELAY_MS);
+}
+
+function setupPro() {
+  $("plans-back").addEventListener("click", () => show(state.plansFrom && state.plansFrom !== "plans" ? state.plansFrom : "profile"));
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("[data-pro-go]")) {
+      // «Тарифы» не в меню: открываются из ИИ-подбора и из профиля, «← Назад» возвращает туда же
+      const from = document.querySelector(".view:not([hidden])");
+      state.plansFrom = from ? from.id.replace(/^view-/, "") : "profile";
+      closePremiumSheet();
+      show("plans");
+      return;
+    }
+    const button = e.target.closest("[data-pro-action]");
+    if (!button) return;
+    const source = button.dataset.proSource || "plans";
+    if (button.dataset.proAction === "click") {
+      state.pro.clicked = true;
+      proLog("click", source);
+      const sheet = $("premium-sheet");
+      if (sheet) sheet.querySelector(".pro-actions").outerHTML = `<p class="pro-thanks">${PREMIUM_THANKS}</p>`, sheet.querySelector(".pro-skip")?.remove();
+      renderPlansPro();
+    } else {
+      state.pro.dismissed = true;
+      proLog("dismiss", source);
+      closePremiumSheet();
+      if (button.classList.contains("pro-skip")) toast("Продолжаем бесплатно. Тарифы можно посмотреть в профиле.");
+    }
+  });
+}
+
+// ======================================================
 // ОСНОВАТЕЛЬ: ПОДБОР ПАРТНЁРА
 // ======================================================
 
@@ -2945,6 +3039,8 @@ async function authorize() {
     try {
       me = await api("GET", "/api/me");
       state.intent = me.intent;
+      if (me.pro) state.pro = me.pro;
+      renderPlansPro();
     } catch {
       // не критично — просто без экрана выбора
     }
@@ -2975,6 +3071,8 @@ document.addEventListener("DOMContentLoaded", () => {
   setupSearchForm();
   setupOfferForm();
   setupNewUi();
+  setupPro();
+  setupCandidateCards();
 
   $("projects-list").addEventListener("click", (e) => {
     const target = e.target.closest("[data-open]");

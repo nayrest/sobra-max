@@ -232,7 +232,11 @@ check("Pro: до нажатия clicked = false", me.get("pro") == {"clicked": F
 call("POST", "/api/pro/event", SK_A, {"event": "click", "source": "match"})
 call("POST", "/api/pro/event", SK_A, {"event": "click", "source": "profile"})  # повтор не ломает
 s, me = call("GET", "/api/me", SK_A)
-check("Pro: после «Подключить» clicked = true", me.get("pro", {}).get("clicked") is True, me)
+check("Premium: после «Оформить Premium» clicked = true", me.get("pro", {}).get("clicked") is True, me)
+s, _ = call("POST", "/api/pro/event", SK_A, {"event": "click", "source": "plans"})
+check("Pro: нажатие на странице «Тарифы» принимается", s == 200, s)
+s, _ = call("POST", "/api/pro/event", SK_A, {"event": "shown", "source": "popup"})
+check("Premium: показ всплывающей панели принимается", s == 200, s)
 s, err = call("POST", "/api/pro/event", SK_A, {"event": "pay"})
 check("Pro: неизвестное событие → 400", s == 400, (s, err))
 s, err = call("POST", "/api/pro/event", SK_A, {"event": "click", "source": "evil"})
