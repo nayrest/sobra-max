@@ -939,6 +939,17 @@ body.premium-open .content { padding-bottom: calc(var(--sheet-h, 360px) + var(--
 .cand-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
 .cand-actions .btn { width: 100%; }
 @media (max-width: 420px) { .cand-cols { grid-template-columns: 1fr; } }
+/* Телефон: кнопка Premium под заголовком, а не рядом — иначе заголовок сжимается в столбик */
+@media (max-width: 599px) {
+  .match-head { flex-direction: column; align-items: stretch; gap: 12px; }
+  .match-head .premium-pill { align-self: flex-start; padding: 9px 14px; font-size: 13px; }
+  .cand-top .avatar { width: 44px; height: 44px; font-size: 15px; }
+  .cand-score { min-width: 66px; padding: 6px 8px; }
+  .cand-score b { font-size: 19px; }
+  .cand-score span { font-size: 10px; }
+  .cand-top .badge { white-space: nowrap; }
+  .cand-actions { gap: 8px; }
+}
 /* PREMIUM-END */
 
 /* NAV-CYCLE-START — «Как работает SOBRA» в меню ПК сворачивается (по макету Артемия) */
