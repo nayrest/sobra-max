@@ -437,7 +437,7 @@ async function getReceivedOffers(founderId) {
      JOIN startups ON startups.id = offers.startup_id
      LEFT JOIN search_profiles sp ON sp.user_id = offers.sender_id
      WHERE startups.founder_id = $1
-       AND (startups.status <> 'deleted' OR offers.status = 'accepted')
+       AND startups.status <> 'deleted' -- удалил проект — отклики на него уходят из «Откликов»; принятые люди остаются только в «Контактах»
      ORDER BY offers.id DESC`,
     [founderId]
   );

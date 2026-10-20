@@ -256,6 +256,8 @@ keep = match_project("Удаление: контакты остаются")
 check("до удаления MATCH виден обоим", has(SK_F, "/api/contacts", keep) and has(SK_B, "/api/matches", keep))
 s, _ = call("DELETE", f"/api/startups/{keep}", SK_F)
 check("удаление без галочки — контакты остаются у обоих", s == 204 and has(SK_F, "/api/contacts", keep) and has(SK_B, "/api/matches", keep))
+in_offers = lambda sid: any(int(o.get("startup_id", 0)) == sid for o in call("GET", "/api/offers/received", SK_F)[1].get("offers", []))
+check("после удаления проекта его отклики ушли из «Откликов»", not in_offers(keep))
 drop = match_project("Удаление: контакты убраны")
 s, _ = call("DELETE", f"/api/startups/{drop}?drop_contacts=1", SK_F)
 check("удаление с галочкой — контакты пропали у обоих",
