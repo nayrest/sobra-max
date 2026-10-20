@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#f7f9ff">
   <title>SOBRA AI</title>
-  <link rel="stylesheet" href="style.css?v=2026-10-19-3">
+  <link rel="stylesheet" href="style.css?v=2026-10-20-5">
   <!-- MAX Bridge: даёт window.WebApp.initData для авторизации -->
   <script src="https://st.max.ru/js/max-web-app.js"></script>
 </head>
@@ -292,25 +292,66 @@
     <!-- ================= ОБЩЕЕ ================= -->
 
     <section id="view-responses" class="view" hidden>
-      <div class="page-head"><h1>Отклики</h1><p>Входящие отклики на ваши проекты и приглашения от основателей.</p></div>
-      <div class="safety-note">
-        <b>🛡 Осторожно с мошенниками.</b> SOBRA никогда не берёт деньги за знакомство. Не переводите деньги «за вход в команду» или «за участие», не сообщайте коды из SMS и пароли. Если собеседник просит об этом — нажмите «Пожаловаться».
+      <div class="page-head"><h1>Отклики и приглашения</h1></div>
+      <div class="scam-banner">
+        <span class="scam-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M12 9v4M12 16h.01"/></svg></span>
+        <div class="grow"><b>Осторожно с мошенниками</b><span>SOBRA не берёт деньги за знакомство.</span></div>
+        <button class="scam-more" type="button" data-scam-more>Подробнее</button>
       </div>
-      <h2 class="section">Отклики на мои проекты</h2>
-      <div id="offers-list" class="list"></div>
-      <h2 class="section">Меня пригласили</h2>
-      <div id="invites-list" class="list"></div>
+      <p class="scam-full" hidden>Не переводите деньги «за вход в команду» или «за участие», не сообщайте коды из SMS и пароли. Если собеседник просит об этом — нажмите «Пожаловаться».</p>
+      <div class="seg" role="tablist">
+        <button class="seg-btn active" type="button" role="tab" aria-selected="true" data-seg="offers">Отклики <span class="seg-count" id="count-offers">0</span></button>
+        <button class="seg-btn" type="button" role="tab" aria-selected="false" data-seg="invites">Приглашения <span class="seg-count" id="count-invites">0</span></button>
+      </div>
+      <div id="offers-list" class="list" data-seg-panel="offers"></div>
+      <div id="invites-list" class="list" data-seg-panel="invites" hidden></div>
     </section>
 
     <section id="view-contacts" class="view" hidden>
       <div class="page-head"><h1>Контакты</h1><p>Люди, с которыми случился MATCH: отклик принят основателем.</p></div>
-      <div class="safety-note">
-        <b>🛡 Осторожно с мошенниками.</b> SOBRA никогда не берёт деньги за знакомство. Не переводите деньги «за вход в команду» или «за участие», не сообщайте коды из SMS и пароли. Если собеседник просит об этом — нажмите «Пожаловаться».
+      <div class="scam-banner">
+        <span class="scam-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M12 9v4M12 16h.01"/></svg></span>
+        <div class="grow"><b>Осторожно с мошенниками</b><span>SOBRA не берёт деньги за знакомство.</span></div>
+        <button class="scam-more" type="button" data-scam-more>Подробнее</button>
       </div>
-      <h2 class="section">Мои кандидаты</h2>
-      <div id="contacts-list" class="list"></div>
-      <h2 class="section">Проекты, которые приняли меня</h2>
-      <div id="matches-list" class="list"></div>
+      <p class="scam-full" hidden>Не переводите деньги «за вход в команду» или «за участие», не сообщайте коды из SMS и пароли. Если собеседник просит об этом — нажмите «Пожаловаться».</p>
+      <div class="seg" role="tablist">
+        <button class="seg-btn active" type="button" role="tab" aria-selected="true" data-seg="contacts">Мои кандидаты <span class="seg-count" id="count-contacts">0</span></button>
+        <button class="seg-btn" type="button" role="tab" aria-selected="false" data-seg="matches">Приняли меня <span class="seg-count" id="count-matches">0</span></button>
+      </div>
+      <div id="contacts-list" class="list" data-seg-panel="contacts"></div>
+      <div id="matches-list" class="list" data-seg-panel="matches" hidden></div>
+    </section>
+
+    <!-- ================= ТАРИФЫ ================= -->
+    <section id="view-plans" class="view" hidden>
+      <div class="page-head"><h1>Тарифы</h1><p>Выберите, что подходит вам сейчас.</p></div>
+      <div class="plans-grid">
+        <article class="plan-card">
+          <h2 class="plan-name">Бесплатно</h2>
+          <p class="plan-price"><b>0 ₽</b></p>
+          <ul class="plan-list">
+          <li>Idea Check</li>
+          <li>Project Map</li>
+          <li>Создание проекта</li>
+          <li>Базовые рекомендации кандидатов</li>
+          <li>Ограниченные приглашения</li>
+          <li>Общение при взаимном согласии</li>
+          </ul>
+        </article>
+        <article class="plan-card pro">
+          <h2 class="plan-name">SOBRA Pro</h2>
+          <p class="plan-price"><b>1 990 ₽</b><span>/год</span></p>
+          <ul class="plan-list">
+          <li>Всё из бесплатного тарифа</li>
+          <li>Подбор под задачи проекта</li>
+          <li>Более точные рекомендации</li>
+          <li>Расширенные фильтры совместимости</li>
+          <li>Увеличенный лимит приглашений</li>
+          <li>Уведомления о новых подходящих специалистах</li>
+          </ul>
+        </article>
+      </div>
     </section>
   </main>
 
@@ -327,6 +368,8 @@
       <span class="tab-icon"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17.5" cy="8.5" r="2.5"/><path d="M16.3 14.1A4.6 4.6 0 0 1 21.6 19"/></svg><b class="tab-badge" id="badge-contacts" hidden></b></span><span>Контакты</span></button>
     <button type="button" data-tab="profile">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span>Профиль</span></button>
+    <button type="button" data-tab="plans">
+      <svg viewBox="0 0 24 24"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.2"/></svg><span>Тарифы</span></button>
     <div class="nav-cycle">
       <p class="nav-title">Как работает SOBRA</p>
       <ol>
@@ -409,6 +452,6 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
-  <script src="app.js?v=2026-10-19-3"></script>
+  <script src="app.js?v=2026-10-20-5"></script>
 </body>
 </html>

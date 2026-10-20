@@ -709,3 +709,133 @@ img { -webkit-user-drag: none; }                          /* картинки н
 .change-intent { margin: 10px 0 2px; }
 .change-intent .text-btn { font-size: 14px; }
 .confirm-check { margin: 4px 0 12px; font-size: 14px; }
+
+
+/* ---------- Отклики и Контакты: плашка, вкладки, пустые состояния ---------- */
+.scam-banner { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin: 0 0 14px; border-radius: 16px; background: #fff1d6; border: 1px solid #f6e2b3; color: #6b4a07; }
+.scam-icon { flex: 0 0 36px; height: 36px; display: grid; place-items: center; border-radius: 12px; background: #fbd77a; color: #6b4a07; }
+.scam-icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.scam-banner .grow { display: flex; flex-direction: column; font-size: 13px; line-height: 1.35; }
+.scam-banner .grow b { font-size: 14px; color: #4d3405; }
+.scam-more { flex: 0 0 auto; border: 0; background: transparent; padding: 0; font-weight: 800; font-size: 13px; color: #4d3405; text-decoration: underline; }
+.scam-full { margin: -6px 0 14px; padding: 12px 14px; border-radius: 12px; background: var(--amber-bg); color: #7a5208; font-size: 13px; line-height: 1.45; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; margin: 0 0 14px; border-radius: 16px; background: #eceef9; }
+.seg-btn { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 11px 8px; border: 0; border-radius: 12px; background: transparent; color: #5b6a8d; font-weight: 700; font-size: 14px; }
+.seg-btn.active { background: #fff; color: var(--ink); box-shadow: 0 2px 8px rgba(45, 67, 140, 0.12); }
+.seg-count { min-width: 24px; padding: 2px 8px; border-radius: 999px; background: #e3e7f7; color: #5b6a8d; font-size: 12px; font-weight: 800; text-align: center; }
+.seg-btn.active .seg-count { background: #ebe6ff; color: #5b3df5; }
+.seg ~ .list { margin-top: 0; }
+.empty-card { text-align: center; padding: 28px 20px 24px; background: #fff; border: 1px solid var(--line); border-radius: 24px; box-shadow: 0 8px 28px rgba(45, 67, 140, 0.05); }
+.empty-art { display: flex; justify-content: center; margin-bottom: 8px; }
+.empty-art svg { width: 132px; height: 110px; }
+.empty-card h3 { font-size: 18px; margin: 6px 0 8px; }
+.empty-card p { max-width: 340px; margin: 0 auto 18px; }
+.empty-card .btn.primary { min-width: 220px; padding: 13px 22px; background: #5b3df5; }
+.list > .empty-card { grid-column: 1 / -1; }
+@media (min-width: 900px) {
+  .seg { max-width: 460px; }
+  .scam-banner, .scam-full { max-width: 720px; }
+  .list > .empty-card { max-width: 720px; }
+}
+
+/* ---------- Выбор навыков: «Выбрано» и группы ---------- */
+.skill-picker { gap: 14px; }
+.skill-selected-box { padding: 12px; border-radius: 16px; background: #f4f2ff; }
+.skill-groups { display: grid; gap: 16px; }
+.skill-group-title { margin: 0 0 8px; font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.skill-picker .skill-chip { padding: 8px 14px; border: 1px solid #dfe5f4; background: #fff; color: var(--ink); font-size: 14px; }
+.skill-picker .skill-chip.on { background: #ece9ff; border-color: #6a4df0; color: #4a2fd0; }
+.skill-picker .skill-chip.on::after { content: none; }
+.skill-picker .skill-chip.chosen { background: #5b3df5; border-color: #5b3df5; color: #fff; }
+.skill-picker .skill-chip.chosen::after { content: "×"; margin-left: 2px; font-size: 16px; line-height: 1; opacity: 0.85; }
+.skill-picker .skill-chip:disabled { opacity: 0.45; cursor: default; }
+
+/* LAYOUT-FIX-START — выравнивание ПК и телефон для всех вкладок */
+
+/* Все блоки внутри вкладки одной ширины и по центру области контента */
+.content > .view,
+.content > .bot-banner { width: 100%; margin-left: auto; margin-right: auto; }
+.list > *, .map-grid > *, .form-grid > *, .seg > * { min-width: 0; }
+.card, .empty-card { min-width: 0; }
+
+/* Заголовок, плашка, вкладки и карточки — одна ширина */
+.scam-banner, .scam-full, .seg, .empty-card { width: 100%; max-width: none; }
+.seg ~ .list { margin-top: 0; }
+.page-head p { max-width: 64ch; }
+
+/* ---------- ТЕЛЕФОН ---------- */
+@media (max-width: 480px) {
+  .content { padding-left: 14px; padding-right: 14px; }
+  .page-head h1 { font-size: 24px; line-height: 1.2; }
+
+  .scam-banner { flex-wrap: wrap; padding: 12px; gap: 10px 12px; }
+  .scam-banner .grow { flex: 1 1 0; min-width: 0; }
+  .scam-more { flex: 1 0 100%; text-align: left; padding: 2px 0 0 48px; }
+
+  .seg-btn { padding: 10px 4px; gap: 6px; font-size: 13px; min-width: 0; }
+  .seg-count { min-width: 22px; padding: 2px 6px; }
+
+  .empty-card { padding: 24px 16px 20px; border-radius: 20px; }
+  .empty-card p { max-width: 100%; }
+  .empty-card .btn.primary { width: 100%; min-width: 0; }
+}
+@media (max-width: 360px) {
+  .page-head h1 { font-size: 21px; }
+  .seg-btn { font-size: 12px; gap: 4px; }
+}
+
+/* ---------- ПК ---------- */
+@media (min-width: 900px) {
+  /* Колонка по центру свободной области (а не прижата влево) */
+  .content > .view,
+  .content > .bot-banner { max-width: 1040px; }
+
+  /* Узкие «читаемые» вкладки — своя ширина, но тоже по центру */
+  #view-responses, #view-contacts, #view-idea, #view-start { max-width: 760px !important; }
+  #view-profile, #view-search { max-width: 920px !important; }
+
+  /* Отклики и Контакты: одна колонка, всё одной ширины */
+  #view-responses .list, #view-contacts .list { grid-template-columns: 1fr; }
+  .scam-banner, .scam-full, .seg { max-width: none; }
+  .list > .empty-card { max-width: none; }
+  .empty-card { padding: 44px 32px 40px; }
+  .empty-art svg { width: 160px; height: 133px; }
+
+  .page-head { margin-bottom: 20px; }
+}
+
+/* Меню закреплено слева: центрируем колонку в оставшейся области */
+@media (min-width: 1200px) {
+  body.nav-open .content { padding-left: calc(var(--sidebar) + 32px); }
+}
+/* LAYOUT-FIX-END */
+
+/* PLANS-START — вкладка «Тарифы» */
+.plans-grid { display: grid; gap: 14px; grid-template-columns: 1fr; align-items: stretch; }
+.plan-card { display: flex; flex-direction: column; min-width: 0; padding: 22px 20px; background: #fff; border: 1px solid var(--line); border-radius: 24px; box-shadow: 0 8px 28px rgba(45, 67, 140, 0.05); }
+.plan-card.pro { border-color: #6a4df0; background: linear-gradient(180deg, #faf8ff, #fff); box-shadow: 0 0 0 1px #6a4df0, 0 12px 32px rgba(91, 61, 245, 0.12); }
+.plan-name { margin: 0 0 6px; font-size: 18px; color: var(--ink); }
+.plan-card.pro .plan-name { color: #4a2fd0; }
+.plan-price { margin: 0 0 16px; padding-bottom: 16px; border-bottom: 1px solid var(--line); color: var(--muted); }
+.plan-price b { font-size: 30px; letter-spacing: -0.02em; color: var(--ink); }
+.plan-price span { margin-left: 4px; font-size: 15px; font-weight: 600; }
+.plan-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.plan-list li { position: relative; padding-left: 28px; line-height: 1.4; color: var(--ink-soft); overflow-wrap: anywhere; }
+.plan-list li::before { content: "✓"; position: absolute; left: 0; top: 1px; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; background: var(--green-bg); color: var(--green); font-size: 12px; font-weight: 800; }
+.plan-card.pro .plan-list li::before { background: #ece9ff; color: #5b3df5; }
+@media (min-width: 700px) { .plans-grid { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 900px) { #view-plans { max-width: 920px; } .plan-card { padding: 28px 28px 30px; } }
+@media (max-width: 480px) { .plan-card { padding: 20px 16px; border-radius: 20px; } .plan-price b { font-size: 26px; } }
+/* Шесть вкладок в нижнем меню на телефоне: подписи чуть мельче, чтобы не обрезались */
+@media (max-width: 899px) {
+  .tabbar { padding-left: 2px; padding-right: 2px; }
+  .tabbar button { padding: 0 1px; font-size: clamp(8.5px, 2.5vw, 10.5px); letter-spacing: -0.01em; }
+}
+/* PLANS-END */
+
+/* PLANS-TOP-START — «Тарифы» первой в боковом меню на ПК */
+@media (min-width: 900px) {
+  .tabbar .nav-title:first-child { order: -2; }
+  .tabbar button[data-tab="plans"] { order: -1; }
+}
+/* PLANS-TOP-END */

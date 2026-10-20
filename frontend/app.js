@@ -269,7 +269,7 @@ function seekingText(s) {
 // view → вкладка нижнего меню, к которой он относится
 const VIEW_TAB = {
   projects: "projects", idea: "projects", project: "projects", match: "projects",
-  search: "search", responses: "responses", contacts: "contacts", profile: "profile",
+  search: "search", responses: "responses", contacts: "contacts", profile: "profile", plans: "plans",
 };
 
 const VIEW_LOAD = {
@@ -1460,6 +1460,15 @@ const SKILL_SUGGESTIONS = [
   "Юриспруденция", "Операционка", "Управление_проектами", "Аналитика", "Контент",
 ];
 
+const SKILL_GROUPS = [
+  { title: "Разработка", tags: ["Python", "JavaScript", "Backend", "Frontend", "Мобильная разработка", "1С"] },
+  { title: "Дизайн", tags: ["UX/UI", "Дизайн"] },
+  { title: "Данные и AI", tags: ["Data Science", "ML", "Аналитика"] },
+  { title: "Маркетинг и продажи", tags: ["Маркетинг", "SMM", "Продажи", "B2B-продажи", "Контент"] },
+  { title: "Управление и финансы", tags: ["Финансы", "Юриспруденция", "Операционка", "Управление проектами"] },
+];
+const skillLabel = (t) => String(t).replace(/_/g, " ");
+
 const skillKey = (tag) => String(tag).toLowerCase().replace(/ё/g, "е").replace(/[-_]+/g, "_");
 
 function cleanSkill(raw) {
@@ -1487,12 +1496,12 @@ const SKILL_SUGGEST_SHORT = 8; // сначала — короткий списо
 function skillPickerHtml(placeholder = "Свой тег") {
   return `<div class="skill-picker" data-skill-picker>
     <input name="skills" hidden>
-    <div class="skill-tags" data-skill-selected></div>
     <div class="skill-add">
       <input class="skill-input input" type="text" maxlength="30" placeholder="${esc(placeholder)}" aria-label="Добавить свой тег">
       <button class="btn secondary small" type="button" data-skill-add-custom>Добавить</button>
     </div>
-    <div class="skill-tags" data-skill-suggest></div>
+    <div class="skill-selected" data-skill-selected hidden></div>
+    <div class="skill-groups" data-skill-suggest></div>
     <p class="hint" data-skill-hint>Нажмите на подходящие или впишите свой. До ${SKILLS_MAX} тегов.</p>
   </div>`;
 }
@@ -1526,15 +1535,24 @@ function setupSkillPicker(root) {
   };
   function render() {
     const list = pickerValue(root);
-    const keys = new Set(list.map(skillKey));
-    root.querySelector("[data-skill-selected]").innerHTML = list
-      .map((t, i) => `<button type="button" class="skill-chip on" data-skill-remove="${i}" aria-label="Убрать тег ${esc(t)}">#${esc(t)}</button>`)
-      .join("");
-    const rest = SKILL_SUGGESTIONS.filter((t) => !keys.has(skillKey(t)));
-    const shown = root._all ? rest : rest.slice(0, SKILL_SUGGEST_SHORT);
-    root.querySelector("[data-skill-suggest]").innerHTML = list.length >= SKILLS_MAX ? "" :
-      shown.map((t) => `<button type="button" class="skill-chip" data-skill-add="${esc(t)}">+ ${esc(t)}</button>`).join("") +
-      (rest.length > shown.length ? `<button type="button" class="text-btn skill-more" data-skill-more>Ещё ${rest.length - shown.length}…</button>` : "");
+    const full = list.length >= SKILLS_MAX;
+    const selected = root.querySelector("[data-skill-selected]");
+    selected.hidden = list.length === 0;
+    selected.innerHTML = list.length
+      ? `<p class="skill-group-title">Выбрано</p><div class="skill-tags skill-selected-box">${list
+          .map((t, i) => `<button type="button" class="skill-chip chosen" data-skill-remove="${i}" aria-label="Убрать тег ${esc(skillLabel(t))}">${esc(skillLabel(t))}</button>`)
+          .join("")}</div>`
+      : "";
+    root.querySelector("[data-skill-suggest]").innerHTML = SKILL_GROUPS.map((g) =>
+      `<div class="skill-group"><p class="skill-group-title">${esc(g.title)}</p><div class="skill-tags">${g.tags
+        .map((label) => {
+          const at = list.findIndex((t) => skillKey(t) === skillKey(cleanSkill(label)));
+          return at >= 0
+            ? `<button type="button" class="skill-chip on" data-skill-remove="${at}">✓ ${esc(label)}</button>`
+            : `<button type="button" class="skill-chip" data-skill-add="${esc(label)}" ${full ? "disabled" : ""}>+ ${esc(label)}</button>`;
+        })
+        .join("")}</div></div>`
+    ).join("");
     hint.textContent = `Нажмите на подходящие или впишите свой. До ${SKILLS_MAX} тегов.`;
   }
   const addCustom = () => {
@@ -2524,6 +2542,71 @@ function setupOfferForm() {
 // ОТКЛИКИ И ПРИГЛАШЕНИЯ
 // ======================================================
 
+// ---------- Вкладки и пустые состояния («Отклики», «Контакты») ----------
+const EMPTY_ART = {
+  chat: `<svg viewBox="0 0 132 110"><circle cx="66" cy="55" r="46" fill="#ece9ff"/><circle cx="30" cy="30" r="4" fill="#4b7bff"/><circle cx="106" cy="34" r="6" fill="#ffc53d"/><circle cx="26" cy="76" r="6" fill="#2fc277"/><path d="M50 36h32a9 9 0 0 1 9 9v20a9 9 0 0 1-9 9H68l-11 10V74h-7a9 9 0 0 1-9-9V45a9 9 0 0 1 9-9z" fill="#fff" stroke="#6a3df0" stroke-width="3.5" stroke-linejoin="round"/><circle cx="55" cy="55" r="3" fill="#6a3df0"/><circle cx="66" cy="55" r="3" fill="#6a3df0"/><circle cx="77" cy="55" r="3" fill="#6a3df0"/></svg>`,
+  user: `<svg viewBox="0 0 132 110"><circle cx="66" cy="55" r="46" fill="#ece9ff"/><circle cx="28" cy="38" r="5" fill="#ffc53d"/><circle cx="36" cy="86" r="3.5" fill="#4b7bff"/><circle cx="104" cy="80" r="6" fill="#2fc277"/><circle cx="66" cy="46" r="11" fill="#fff" stroke="#6a3df0" stroke-width="3.5"/><path d="M45 80c0-12 9-19 21-19s21 7 21 19" fill="none" stroke="#6a3df0" stroke-width="3.5" stroke-linecap="round"/><circle cx="88" cy="38" r="10" fill="#6a3df0"/><path d="M83.5 38l3.2 3.2 5-6" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+};
+
+const EMPTY_STATES = {
+  offers: { art: "chat", title: "Откликов пока нет", text: "Они появятся здесь, когда кто-то откликнется на ваш опубликованный проект.", label: "Опубликовать проект", go: "projects" },
+  invites: { art: "chat", title: "Приглашений пока нет", text: "Откройте профиль для основателей во вкладке «Профиль», чтобы они могли вас найти.", label: "Открыть профиль", go: "profile" },
+  contacts: { art: "user", title: "Кандидатов пока нет", text: "Здесь появятся кандидаты, чьи отклики вы примете.", label: "Перейти к откликам", go: "responses" },
+  matches: { art: "user", title: "Пока нет принявших проектов", text: "Здесь появятся проекты, основатели которых приняли ваш отклик.", label: "Найти проекты", go: "search" },
+};
+
+function emptyCard(container, s) {
+  container.innerHTML = `<div class="empty-card">
+    <div class="empty-art" aria-hidden="true">${EMPTY_ART[s.art]}</div>
+    <h3>${esc(s.title)}</h3>
+    <p class="muted">${esc(s.text)}</p>
+    <button class="btn primary" type="button" data-empty-go="${s.go}">${esc(s.label)}</button>
+  </div>`;
+}
+
+function setSegCount(name, n) {
+  const el = $(`count-${name}`);
+  if (el) el.textContent = String(n);
+}
+
+// Пустая первая вкладка, а во второй что-то есть (кандидат с MATCH, приглашения без откликов) —
+// открываем вторую. Если человек уже сам переключал вкладки, его выбор не трогаем.
+function autoPickSeg(first, firstCount, second, secondCount) {
+  const btn = document.querySelector(`[data-seg="${second}"]`);
+  const seg = btn && btn.closest(".seg");
+  if (!seg || seg.dataset.touched) return;
+  const want = firstCount === 0 && secondCount > 0 ? second : first;
+  const target = seg.querySelector(`[data-seg="${want}"]`);
+  if (target && !target.classList.contains("active")) target.click();
+}
+
+function setupNewUi() {
+  document.querySelectorAll(".seg").forEach((seg) => {
+    seg.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-seg]");
+      if (!btn) return;
+      if (e.isTrusted) seg.dataset.touched = "1"; // переключил сам человек, а не autoPickSeg
+      seg.querySelectorAll("[data-seg]").forEach((b) => {
+        b.classList.toggle("active", b === btn);
+        b.setAttribute("aria-selected", String(b === btn));
+      });
+      seg.closest(".view").querySelectorAll("[data-seg-panel]").forEach((p) => {
+        p.hidden = p.dataset.segPanel !== btn.dataset.seg;
+      });
+    });
+  });
+  document.addEventListener("click", (e) => {
+    const go = e.target.closest("[data-empty-go]");
+    if (go) show(go.dataset.emptyGo);
+    const more = e.target.closest("[data-scam-more]");
+    if (more) {
+      const full = more.closest(".view").querySelector(".scam-full");
+      full.hidden = !full.hidden;
+      more.textContent = full.hidden ? "Подробнее" : "Скрыть";
+    }
+  });
+}
+
 async function loadResponses() {
   const offersEl = $("offers-list");
   const invitesEl = $("invites-list");
@@ -2531,10 +2614,13 @@ async function loadResponses() {
   loading(invitesEl);
 
   try {
-    const [{ offers }, { invites }] = await Promise.all([api("GET", "/api/offers/received"), api("GET", "/api/invites")]);
+    const [{ offers = [] }, { invites = [] }] = await Promise.all([api("GET", "/api/offers/received"), api("GET", "/api/invites")]);
+    setSegCount("offers", offers.length);
+    setSegCount("invites", invites.length);
+    autoPickSeg("offers", offers.length, "invites", invites.length);
 
     if (offers.length === 0) {
-      empty(offersEl, "Откликов пока нет. Они появятся, когда кто-то откликнется на ваш опубликованный проект.");
+      emptyCard(offersEl, EMPTY_STATES.offers);
     } else {
       offersEl.innerHTML = offers.map((o) => {
         const st = OFFER_STATUS[o.status] || { text: o.status, tone: "gray" };
@@ -2555,7 +2641,7 @@ async function loadResponses() {
     }
 
     if (invites.length === 0) {
-      empty(invitesEl, "Приглашений пока нет. Откройте профиль для основателей во вкладке «Профиль», чтобы они могли вас найти.");
+      emptyCard(invitesEl, EMPTY_STATES.invites);
     } else {
       invitesEl.innerHTML = invites.map((s) => projectForCandidate(s, null)).join("");
     }
@@ -2642,9 +2728,12 @@ async function loadContacts() {
   loading(matchesEl);
 
   try {
-    const [{ contacts }, { matches }] = await Promise.all([api("GET", "/api/contacts"), api("GET", "/api/matches")]);
+    const [{ contacts = [] }, { matches = [] }] = await Promise.all([api("GET", "/api/contacts"), api("GET", "/api/matches")]);
+    setSegCount("contacts", contacts.length);
+    setSegCount("matches", matches.length);
+    autoPickSeg("contacts", contacts.length, "matches", matches.length);
 
-    if (contacts.length === 0) empty(contactsEl, "Здесь появятся кандидаты, чьи отклики вы примете.");
+    if (contacts.length === 0) emptyCard(contactsEl, EMPTY_STATES.contacts);
     else contactsEl.innerHTML = contacts.map((c) => `<article class="card">
         <div class="chips">${badge("MATCH", "green")} ${badge(c.type, "gray")} ${demoBadge(c.candidate_id)}</div>
         <div class="person">${avatarHtml(c.candidate_avatar_url, c.candidate_name)}
@@ -2656,7 +2745,7 @@ async function loadContacts() {
         <div class="card-foot">${reportButton("user", c.candidate_id, c.candidate_name || "пользователь MAX")}</div>
       </article>`).join("");
 
-    if (matches.length === 0) empty(matchesEl, "Здесь появятся проекты, основатели которых приняли ваш отклик.");
+    if (matches.length === 0) emptyCard(matchesEl, EMPTY_STATES.matches);
     else matchesEl.innerHTML = matches.map((m) => `<article class="card">
         <div class="chips">${badge("MATCH", "green")} ${badge(m.type, "gray")} ${demoBadge(m.founder_id)}</div>
         <h3>${esc(m.startup_name)}</h3>
@@ -2797,6 +2886,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupReports();
   setupSearchForm();
   setupOfferForm();
+  setupNewUi();
 
   $("projects-list").addEventListener("click", (e) => {
     const target = e.target.closest("[data-open]");
