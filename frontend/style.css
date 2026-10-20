@@ -914,6 +914,9 @@ body.premium-open .content { padding-bottom: calc(var(--sheet-h, 360px) + var(--
 .cand-top { display: flex; gap: 12px; align-items: flex-start; }
 .cand-top .avatar { width: 52px; height: 52px; font-size: 17px; }
 .cand-top h3 { margin: 0; }
+/* Метки кандидата («Телефон подтверждён», «Демо») — отдельной строкой под именем и процентом */
+.cand-badges { margin: 10px 0 0; }
+
 .cand-top .muted { margin: 2px 0 4px; }
 .cand-score { flex: 0 0 auto; min-width: 82px; padding: 8px 10px; border-radius: 14px; text-align: center; }
 .cand-score b { display: block; font-size: 22px; line-height: 1.1; }
@@ -947,8 +950,8 @@ body.premium-open .content { padding-bottom: calc(var(--sheet-h, 360px) + var(--
   .cand-score { min-width: 66px; padding: 6px 8px; }
   .cand-score b { font-size: 19px; }
   .cand-score span { font-size: 10px; }
-  .cand-top .badge { white-space: nowrap; }
   .cand-actions { gap: 8px; }
+  .cand-actions .btn { padding-left: 6px; padding-right: 6px; font-size: 14px; white-space: nowrap; }
 }
 /* PREMIUM-END */
 

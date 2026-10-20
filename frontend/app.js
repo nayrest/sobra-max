@@ -1869,10 +1869,11 @@ function candidateCard(c) {
       <div class="grow">
         <h3>${esc(c.name)}</h3>
         <p class="muted">${esc(GOALS[c.goal] || "")}</p>
-        <div class="chips">${demoBadge(c.user_id)} ${verifiedBadge(c.phone_verified)}</div>
       </div>
       ${ai ? `<div class="cand-score ${v.cls}"><b>${ai.score}%</b><span>Совпадение</span></div>` : ""}
     </div>
+    ${demoBadge(c.user_id) || verifiedBadge(c.phone_verified)
+      ? `<div class="chips cand-badges">${demoBadge(c.user_id)} ${verifiedBadge(c.phone_verified)}</div>` : ""}
     ${tags.length ? `<div class="cand-tags">${tags.map((t) => `<span class="cand-tag${hit.has(skillKey(t)) ? " match" : ""}">${esc(skillLabel(t))}</span>`).join("")}</div>` : ""}
     ${recommendation ? `<div class="cand-reco"><p class="cand-reco-title">✦ Рекомендации ИИ</p><p>${esc(recommendation)}</p></div>` : ""}
     ${strengths.length || ask.length ? `<div class="cand-cols">
@@ -1887,7 +1888,7 @@ function candidateCard(c) {
     ${isDemoId(c.user_id) && !c.invited ? `<p class="muted demo-note">Демо-кандидат: на приглашение он откликнется автоматически через несколько секунд.</p>` : ""}
     <div class="actions cand-actions">
       ${c.invited
-        ? `<button class="btn secondary" type="button" disabled>Приглашение отправлено ✓</button>`
+        ? `<button class="btn secondary" type="button" disabled>Приглашён ✓</button>`
         : `<button class="btn primary" type="button" data-invite="${c.user_id}" ${isDemoId(c.user_id) ? "data-demo" : ""}>Пригласить</button>`}
       <button class="btn secondary" type="button" data-cand-more>Подробнее ›</button>
     </div>
@@ -1947,7 +1948,7 @@ async function handleInvite(event) {
     await busy(button, "Отправляем…", () =>
       api("POST", `/api/startups/${state.currentProjectId}/invite`, { user_id: Number(button.dataset.invite) })
     );
-    button.outerHTML = `<button class="btn secondary" type="button" disabled>Приглашение отправлено ✓</button>`;
+    button.outerHTML = `<button class="btn secondary" type="button" disabled>Приглашён ✓</button>`;
     toast("demo" in button.dataset
       ? "Приглашение отправлено. Демо-кандидат откликнется через несколько секунд — смотрите «Отклики»."
       : "Приглашение отправлено. Кандидат получит сообщение в MAX.");
