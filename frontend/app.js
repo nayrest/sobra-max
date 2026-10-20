@@ -269,7 +269,7 @@ function seekingText(s) {
 // view → вкладка нижнего меню, к которой он относится
 const VIEW_TAB = {
   projects: "projects", idea: "projects", project: "projects", match: "projects",
-  search: "search", responses: "responses", contacts: "contacts", profile: "profile", plans: "plans",
+  search: "search", responses: "responses", contacts: "contacts", profile: "profile", plans: "projects",
 };
 
 const VIEW_LOAD = {
@@ -282,27 +282,27 @@ const VIEW_LOAD = {
   profile: loadProfile,
 };
 
-// ПК: меню сбоку. От 1200px оно закреплено открытым, от 900 до 1199 — выезжает (off-canvas).
+// ПК (от 900px): меню закреплено слева, бургер сворачивает его. Телефон: меню выезжает поверх контента.
 const desktopMq = window.matchMedia("(min-width: 900px)");
-const dockMq = window.matchMedia("(min-width: 1200px)");
+const dockMq = desktopMq;
 
 function setNav(open) {
-  const isOpen = Boolean(open && desktopMq.matches);
-  document.body.classList.toggle("nav-open", isOpen);
-  $("menu-toggle").setAttribute("aria-expanded", String(isOpen));
-  $("nav-backdrop").hidden = !(isOpen && !dockMq.matches);
+  const docked = dockMq.matches;
+  document.body.classList.toggle("nav-collapsed", docked && !open);
+  document.body.classList.toggle("nav-open", !docked && Boolean(open));
+  $("menu-toggle").setAttribute("aria-expanded", String(Boolean(open)));
+  $("nav-backdrop").hidden = docked || !open;
 }
 
 function setupSideMenu() {
-  $("menu-toggle").addEventListener("click", () => setNav(!document.body.classList.contains("nav-open")));
+  const isOpen = () => (dockMq.matches ? !document.body.classList.contains("nav-collapsed") : document.body.classList.contains("nav-open"));
+  $("menu-toggle").addEventListener("click", () => setNav(!isOpen()));
   $("nav-backdrop").addEventListener("click", () => setNav(false));
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !dockMq.matches) setNav(false);
   });
-  const reset = () => setNav(dockMq.matches);
-  dockMq.addEventListener("change", reset);
-  desktopMq.addEventListener("change", reset);
-  reset();
+  dockMq.addEventListener("change", () => setNav(dockMq.matches));
+  setNav(dockMq.matches);
 }
 
 // ======================================================
@@ -484,21 +484,24 @@ async function loadProjects() {
     }
     list.innerHTML = startups.map((s) => {
       const total = (s.tasks_open || 0) + (s.tasks_done || 0);
+      const ready = Number(s.readiness) || 0;
+      const status = s.status === "published" ? "Опубликован" : s.seeking ? "Черновик" : "Проверка идеи";
+      const need = s.seeking
+        ? `<b>Ищем:</b> ${esc(s.partner_needed || s.seeking)}`
+        : `<b>Сейчас:</b> проверка идеи, партнёр не нужен`;
       return `
-      <article class="card project-card" data-open="${s.id}">
-        <div class="project-row">
-          <span class="project-icon">${CATEGORY_ICON[s.category] || "💡"}</span>
-          <div class="grow">
-            <h3>${esc(s.name)}</h3>
-            <div class="chips">
-              ${s.status === "published" ? badge("Опубликован", "green") : s.seeking ? badge("Черновик", "amber") : badge("Проверка идеи", "blue")}
-              ${badge(s.stage)} ${badge(s.category, "violet")}
-            </div>
-          </div>
+      <article class="proj" data-open="${s.id}">
+        <div class="proj-top">
+          <div class="proj-ico">${CATEGORY_ICON[s.category] || "💡"}</div>
+          <div><h3>${esc(s.name)}</h3><p>${esc(s.category)} · ${status}</p><span class="stage">${esc(s.stage)}</span></div>
         </div>
-        ${s.readiness !== null && s.readiness !== undefined ? readinessBar(s.readiness) : ""}
+        ${s.readiness !== null && s.readiness !== undefined ? `<div>
+          <div class="prog-label"><span>Project Map</span><span>${ready}% проверено</span></div>
+          <div class="bar"><i style="width:${ready}%"></i></div>
+        </div>` : ""}
+        <div class="need">${need}</div>
         ${total ? `<p class="muted plan-mini">План действий: выполнено ${s.tasks_done || 0}, осталось ${s.tasks_open || 0}</p>` : ""}
-        <div class="actions"><button class="btn secondary small" type="button" data-open="${s.id}">Открыть карту проекта →</button></div>
+        <button class="btn primary" type="button" data-open="${s.id}">Открыть карту проекта →</button>
       </article>`;
     }).join("");
   } catch (error) {
@@ -1733,8 +1736,101 @@ function editBlock(startup, blockId) {
 // ОСНОВАТЕЛЬ: ПОДБОР ПАРТНЁРА
 // ======================================================
 
+// MATCH-UI-START — окно «ИИ-подбор партнёра»: фильтры и карточки кандидатов
+const matchUi = { list: [], notice: "", filter: "all" };
+
+const TRACK_WORDS = {
+  tech: /python|golang|\bgo\b|backend|frontend|fullstack|devops|sql|\bapi\b|\bml\b|react|java|разработ|программ|данн|инженер|тестир|мобильн|ios|android/i,
+  marketing: /маркет|smm|seo|реклам|контент|бренд|\bpr\b|трафик|продвиж|соцсет|growth/i,
+};
+
+// Направление кандидата: сервер может прислать c.track ("tech" | "marketing"), иначе определяем по навыкам
+function candidateTrack(c) {
+  if (c.track) return c.track;
+  const text = [c.role, ...(c.skills || [])].join(" ");
+  if (TRACK_WORDS.marketing.test(text)) return "marketing";
+  if (TRACK_WORDS.tech.test(text)) return "tech";
+  return "other";
+}
+
+const MATCH_FILTERS = [
+  { id: "all", label: "Все", test: () => true },
+  { id: "strong", label: "Сильные совпадения", dot: "green", test: (c) => c.ai?.verdict === "strong" },
+  { id: "partial", label: "Частичные", dot: "amber", test: (c) => c.ai?.verdict === "partial" },
+  { id: "tech", label: "Технические", icon: "</>", test: (c) => candidateTrack(c) === "tech" },
+  { id: "marketing", label: "Маркетинг", icon: "📣", test: (c) => candidateTrack(c) === "marketing" },
+];
+
+function candidateCard(c) {
+  const ai = c.ai || {};
+  const tone = AI_VERDICTS[ai.verdict] ? ai.verdict : "none";
+  const hasScore = tone !== "none" && Number.isFinite(Number(ai.score));
+  const strengths = (ai.reasons || []).slice(0, 3);
+  const doubts = ((ai.clarify && ai.clarify.length ? ai.clarify : ai.missing) || []).slice(0, 3);
+  const roleLine = [c.role || GOALS[c.goal], c.experience].filter(Boolean).join(" • ");
+  const hit = new Set((c.skills_common || []).map(skillKey));
+  const skills = c.skills || [];
+  const chips = skills.slice(0, 5).map((t) => `<span class="cand-chip${hit.has(skillKey(t)) ? " hit" : ""}">${esc(t)}</span>`).join("")
+    + (skills.length > 5 ? `<span class="cand-chip more">+${skills.length - 5}</span>` : "");
+
+  const list = (items, cls) => `<ul class="note-list ${cls}">${items.map((i) => `<li>${esc(i)}</li>`).join("")}</ul>`;
+  const notes = strengths.length || doubts.length ? `<div class="cand-notes">
+      ${strengths.length ? `<section class="note-box good"><h4><i class="ni">✓</i>Сильные стороны</h4>${list(strengths, "good")}</section>` : ""}
+      ${doubts.length ? `<section class="note-box warn"><h4><i class="ni">!</i>Что уточнить</h4>${list(doubts, "warn")}</section>` : ""}
+    </div>` : "";
+
+  const rec = tone !== "none" ? `<section class="ai-rec"><i class="ai-rec-ico" aria-hidden="true">✦</i>
+      <h4>Рекомендации ИИ</h4><p>${esc(ai.summary || AI_VERDICTS[tone].text)}</p></section>` : "";
+
+  const invite = c.invited
+    ? `<button class="btn secondary" type="button" disabled>Приглашение отправлено ✓</button>`
+    : `<button class="btn primary" type="button" data-invite="${c.user_id}" ${isDemoId(c.user_id) ? "data-demo" : ""}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 3L3 11l7 2.5L12.5 21 21 3z"/></svg>Пригласить</button>`;
+
+  return `<article class="cand tone-${tone}" data-cand="${esc(c.user_id)}">
+    <div class="cand-top">
+      <span class="cand-ring">${avatarHtml(c.avatar_url, c.name)}</span>
+      <div class="cand-id"><h3>${esc(c.name)}</h3>${roleLine ? `<p>${esc(roleLine)}</p>` : ""}</div>
+      ${hasScore ? `<div class="cand-score"><b><i>✦</i> ${Number(ai.score)}%</b><small>Совпадение</small></div>` : ""}
+    </div>
+    ${chips ? `<div class="cand-chips">${chips}</div>` : ""}
+    ${rec}
+    ${notes}
+    <div class="cand-actions">
+      ${invite}
+      <button class="btn secondary" type="button" data-more aria-expanded="false"><span>Подробнее</span>
+        <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+    </div>
+    <div class="cand-more" hidden>
+      ${c.about ? `<p class="answer">${esc(c.about)}</p>` : ""}
+      <div class="chips">${demoBadge(c.user_id)} ${verifiedBadge(c.phone_verified)}</div>
+      ${skillMatchNote(c.skills_common)}
+      ${isDemoId(c.user_id) && !c.invited ? `<p class="muted demo-note">Демо-кандидат: на приглашение он откликнется автоматически через несколько секунд.</p>` : ""}
+      <div class="card-foot">${reportButton("user", c.user_id, c.name)}</div>
+    </div>
+  </article>`;
+}
+
+function renderMatchList() {
+  const filtersEl = $("match-filters");
+  const list = $("match-list");
+  const all = matchUi.list;
+  if (!MATCH_FILTERS.some((f) => f.id === matchUi.filter && (f.id === "all" || all.some(f.test)))) matchUi.filter = "all";
+
+  filtersEl.innerHTML = MATCH_FILTERS.map((f) => {
+    const n = all.filter(f.test).length;
+    if (f.id !== "all" && n === 0) return "";
+    const mark = f.dot ? `<i class="dot ${f.dot}"></i>` : f.icon ? `<i class="ico">${f.icon}</i>` : "";
+    return `<button type="button" class="mf${f.id === matchUi.filter ? " active" : ""}" data-filter="${f.id}" aria-pressed="${f.id === matchUi.filter}">${mark}${esc(f.label)} (${n})</button>`;
+  }).join("");
+
+  const active = MATCH_FILTERS.find((f) => f.id === matchUi.filter);
+  list.innerHTML = matchUi.notice + all.filter(active.test).map(candidateCard).join("");
+}
+
 async function loadCandidates(id) {
   const list = $("match-list");
+  $("match-filters").innerHTML = "";
   loading(list, "ИИ сравнивает кандидатов с потребностью проекта. Это займёт несколько секунд…");
   try {
     const { candidates, ai } = await api("GET", `/api/startups/${id}/candidates`);
@@ -1742,29 +1838,35 @@ async function loadCandidates(id) {
       empty(list, "Пока нет кандидатов, которые открыли профиль под такую потребность. Мы сообщим, когда они появятся — а пока проект видят в поиске.");
       return;
     }
-    list.innerHTML = aiNotice(ai, "") + candidates.map((c) => `
-      <article class="card">
-        <div class="person">
-          ${avatarHtml(c.avatar_url, c.name)}
-          <div class="grow"><h3>${esc(c.name)}</h3><p class="muted">${esc(GOALS[c.goal] || "")}</p>
-            <div class="chips">${demoBadge(c.user_id)} ${verifiedBadge(c.phone_verified)}</div></div>
-        </div>
-        <p class="answer">${esc(c.about)}</p>
-        ${skillTags(c.skills, c.skills_common)}
-        ${skillMatchNote(c.skills_common)}
-        ${renderAi(c.ai)}
-        ${isDemoId(c.user_id) && !c.invited ? `<p class="muted demo-note">Демо-кандидат: на приглашение он откликнется автоматически через несколько секунд.</p>` : ""}
-        <div class="actions">
-          ${c.invited
-            ? `<button class="btn secondary" type="button" disabled>Приглашение отправлено ✓</button>`
-            : `<button class="btn primary" type="button" data-invite="${c.user_id}" ${isDemoId(c.user_id) ? "data-demo" : ""}>Пригласить в проект</button>`}
-        </div>
-        <div class="card-foot">${reportButton("user", c.user_id, c.name)}</div>
-      </article>`).join("");
+    matchUi.list = candidates.slice().sort((a, b) => (Number(b.ai?.score) || 0) - (Number(a.ai?.score) || 0));
+    matchUi.notice = aiNotice(ai, "");
+    matchUi.filter = "all";
+    renderMatchList();
   } catch (error) {
     failed(list, error, () => loadCandidates(id));
   }
 }
+
+// Фильтры, «Подробнее» и кнопка «Оформить Pro» — один общий обработчик кликов
+document.addEventListener("click", (event) => {
+  const chip = event.target.closest("[data-filter]");
+  if (chip) {
+    matchUi.filter = chip.dataset.filter;
+    renderMatchList();
+    return;
+  }
+  const more = event.target.closest("[data-more]");
+  if (more) {
+    const card = more.closest(".cand");
+    const open = card.classList.toggle("open");
+    card.querySelector(".cand-more").hidden = !open;
+    more.setAttribute("aria-expanded", String(open));
+    more.querySelector("span").textContent = open ? "Свернуть" : "Подробнее";
+    return;
+  }
+  if (event.target.closest("[data-go-plans]")) show("plans");
+});
+// MATCH-UI-END
 
 async function handleInvite(event) {
   const button = event.target.closest("[data-invite]");
@@ -2569,23 +2671,11 @@ function setSegCount(name, n) {
   if (el) el.textContent = String(n);
 }
 
-// Пустая первая вкладка, а во второй что-то есть (кандидат с MATCH, приглашения без откликов) —
-// открываем вторую. Если человек уже сам переключал вкладки, его выбор не трогаем.
-function autoPickSeg(first, firstCount, second, secondCount) {
-  const btn = document.querySelector(`[data-seg="${second}"]`);
-  const seg = btn && btn.closest(".seg");
-  if (!seg || seg.dataset.touched) return;
-  const want = firstCount === 0 && secondCount > 0 ? second : first;
-  const target = seg.querySelector(`[data-seg="${want}"]`);
-  if (target && !target.classList.contains("active")) target.click();
-}
-
 function setupNewUi() {
   document.querySelectorAll(".seg").forEach((seg) => {
     seg.addEventListener("click", (e) => {
       const btn = e.target.closest("[data-seg]");
       if (!btn) return;
-      if (e.isTrusted) seg.dataset.touched = "1"; // переключил сам человек, а не autoPickSeg
       seg.querySelectorAll("[data-seg]").forEach((b) => {
         b.classList.toggle("active", b === btn);
         b.setAttribute("aria-selected", String(b === btn));
@@ -2617,7 +2707,6 @@ async function loadResponses() {
     const [{ offers = [] }, { invites = [] }] = await Promise.all([api("GET", "/api/offers/received"), api("GET", "/api/invites")]);
     setSegCount("offers", offers.length);
     setSegCount("invites", invites.length);
-    autoPickSeg("offers", offers.length, "invites", invites.length);
 
     if (offers.length === 0) {
       emptyCard(offersEl, EMPTY_STATES.offers);
@@ -2731,7 +2820,6 @@ async function loadContacts() {
     const [{ contacts = [] }, { matches = [] }] = await Promise.all([api("GET", "/api/contacts"), api("GET", "/api/matches")]);
     setSegCount("contacts", contacts.length);
     setSegCount("matches", matches.length);
-    autoPickSeg("contacts", contacts.length, "matches", matches.length);
 
     if (contacts.length === 0) emptyCard(contactsEl, EMPTY_STATES.contacts);
     else contactsEl.innerHTML = contacts.map((c) => `<article class="card">
