@@ -113,6 +113,7 @@ const state = {
   lastSearchGoal: null,
   lastUpdate: null, // результат последнего шага Update: показываем баннер «было → стало»
   intent: null, // с чем пришёл: idea — только проверить идею, partner — найти партнёра, join — присоединиться
+  pro: { clicked: false, dismissed: false }, // SOBRA Pro: нажал «Оформить подписку» / «Продолжить бесплатно»
 };
 
 // ======================================================
@@ -269,7 +270,7 @@ function seekingText(s) {
 // view → вкладка нижнего меню, к которой он относится
 const VIEW_TAB = {
   projects: "projects", idea: "projects", project: "projects", match: "projects",
-  search: "search", responses: "responses", contacts: "contacts", profile: "profile", plans: "plans",
+  search: "search", responses: "responses", contacts: "contacts", profile: "profile", plans: "profile",
 };
 
 const VIEW_LOAD = {
@@ -1730,6 +1731,73 @@ function editBlock(startup, blockId) {
 }
 
 // ======================================================
+// SOBRA PRO — «Оформить подписку»
+// Оплаты пока нет: кнопка честно говорит, что подписка появится после запуска,
+// и считает, сколько людей хотят её оформить (POST /api/pro/event). Бесплатное ничем не ограничиваем.
+// Показываем после бесплатного подбора — человек уже увидел, как работает AI Match.
+// ======================================================
+
+const PRO_THANKS = "✓ Спасибо! Оформить подписку можно будет после запуска — мы отметили ваш интерес и сообщим первыми. Всё, чем вы пользуетесь сейчас, остаётся бесплатным.";
+
+function proCardHtml(source) {
+  return `<section class="card pro-card" data-pro-card="${source}">
+    <div class="pro-head">
+      <span class="pro-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6L3.3 9.3l6.1-.7z"/></svg></span>
+      <div class="grow"><p class="eyebrow">SOBRA Pro · 1 990 ₽/год</p><h3>Найдите команду быстрее</h3></div>
+    </div>
+    <p class="muted">Подбор под задачи проекта, более точные рекомендации и уведомления, когда появятся подходящие специалисты.</p>
+    ${state.pro.clicked
+      ? `<p class="pro-thanks">${PRO_THANKS}</p>`
+      : `<div class="actions pro-actions">
+          <button class="btn primary" type="button" data-pro-action="click">Оформить подписку</button>
+          <button class="btn secondary" type="button" data-pro-go="plans">Сравнить тарифы</button>
+        </div>
+        <button class="text-btn pro-skip" type="button" data-pro-action="dismiss">Продолжить бесплатно</button>`}
+  </section>`;
+}
+
+// Кнопка на странице «Тарифы» — под карточкой SOBRA Pro
+function renderPlansPro() {
+  const box = $("plans-pro-actions");
+  if (!box) return;
+  box.innerHTML = state.pro.clicked
+    ? `<p class="pro-thanks">${PRO_THANKS}</p>`
+    : `<button class="btn primary block" type="button" data-pro-action="click" data-pro-source="plans">Оформить подписку</button>`;
+}
+
+const proLog = (event, source) => api("POST", "/api/pro/event", { event, source }).catch(() => {}); // статистика не должна мешать
+const proShown = (source) => { if (document.querySelector(`[data-pro-card="${source}"]`)) proLog("shown", source); };
+
+function setupPro() {
+  $("plans-back").addEventListener("click", () => show(state.plansFrom && state.plansFrom !== "plans" ? state.plansFrom : "profile"));
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("[data-pro-go]")) {
+      // «Тарифы» не в меню: открываются из ИИ-подбора и из профиля, «← Назад» возвращает туда же
+      const from = document.querySelector(".view:not([hidden])");
+      state.plansFrom = from ? from.id.replace(/^view-/, "") : "profile";
+      show("plans");
+      return;
+    }
+    const button = e.target.closest("[data-pro-action]");
+    if (!button) return;
+    const card = button.closest("[data-pro-card]");
+    const source = button.dataset.proSource || (card && card.dataset.proCard) || "match";
+    if (button.dataset.proAction === "click") {
+      state.pro.clicked = true;
+      proLog("click", source);
+      document.querySelectorAll("[data-pro-card] .pro-actions").forEach((el) => (el.outerHTML = `<p class="pro-thanks">${PRO_THANKS}</p>`));
+      document.querySelectorAll("[data-pro-card] .pro-skip").forEach((el) => el.remove());
+      renderPlansPro();
+    } else {
+      state.pro.dismissed = true;
+      proLog("dismiss", source);
+      if (card) card.remove();
+      toast("Продолжаем бесплатно. Тарифы можно посмотреть в профиле.");
+    }
+  });
+}
+
+// ======================================================
 // ОСНОВАТЕЛЬ: ПОДБОР ПАРТНЁРА
 // ======================================================
 
@@ -1760,7 +1828,8 @@ async function loadCandidates(id) {
             : `<button class="btn primary" type="button" data-invite="${c.user_id}" ${isDemoId(c.user_id) ? "data-demo" : ""}>Пригласить в проект</button>`}
         </div>
         <div class="card-foot">${reportButton("user", c.user_id, c.name)}</div>
-      </article>`).join("");
+      </article>`).join("") + (state.pro.dismissed ? "" : proCardHtml("match"));
+    proShown("match");
   } catch (error) {
     failed(list, error, () => loadCandidates(id));
   }
@@ -2857,6 +2926,8 @@ async function authorize() {
     try {
       me = await api("GET", "/api/me");
       state.intent = me.intent;
+      if (me.pro) state.pro = me.pro;
+      renderPlansPro();
     } catch {
       // не критично — просто без экрана выбора
     }
@@ -2887,6 +2958,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupSearchForm();
   setupOfferForm();
   setupNewUi();
+  setupPro();
 
   $("projects-list").addEventListener("click", (e) => {
     const target = e.target.closest("[data-open]");

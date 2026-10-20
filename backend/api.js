@@ -1254,7 +1254,7 @@ function createApi({ notify = {} } = {}) {
   // SOBRA Pro: оплаты пока нет — считаем, сколько людей увидели тариф и нажали «Подключить»
   app.post("/api/pro/event", wrap(async (req, res) => {
     const event = requireOneOf(req.body?.event, ["shown", "click", "dismiss"], "event");
-    const source = requireOneOf(req.body?.source || "match", ["match", "profile"], "source");
+    const source = requireOneOf(req.body?.source || "match", ["match", "profile", "plans"], "source");
     await db.logProEvent(req.user.userId, event, source);
     res.json({ ok: true });
   }));

@@ -826,16 +826,27 @@ img { -webkit-user-drag: none; }                          /* картинки н
 @media (min-width: 700px) { .plans-grid { grid-template-columns: 1fr 1fr; } }
 @media (min-width: 900px) { #view-plans { max-width: 920px; } .plan-card { padding: 28px 28px 30px; } }
 @media (max-width: 480px) { .plan-card { padding: 20px 16px; border-radius: 20px; } .plan-price b { font-size: 26px; } }
-/* Шесть вкладок в нижнем меню на телефоне: подписи чуть мельче, чтобы не обрезались */
-@media (max-width: 899px) {
-  .tabbar { padding-left: 2px; padding-right: 2px; }
-  .tabbar button { padding: 0 1px; font-size: clamp(8.5px, 2.5vw, 10.5px); letter-spacing: -0.01em; }
-}
 /* PLANS-END */
 
-/* PLANS-TOP-START — «Тарифы» первой в боковом меню на ПК */
-@media (min-width: 900px) {
-  .tabbar .nav-title:first-child { order: -2; }
-  .tabbar button[data-tab="plans"] { order: -1; }
+
+
+/* PRO-CARD-START — карточка SOBRA Pro под ИИ-подбором и кнопка на странице «Тарифы» */
+.pro-card { border: 1px solid #d9ccff; background: linear-gradient(180deg, #faf7ff 0%, #fff 70%); }
+.pro-head { display: flex; gap: 12px; align-items: center; margin-bottom: 6px; }
+.pro-head h3 { margin: 2px 0 0; }
+.pro-head .eyebrow { margin: 0; color: var(--violet); }
+.pro-icon { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: #efe8ff; }
+.pro-icon svg { width: 22px; height: 22px; fill: #7041f5; }
+.pro-actions { flex-wrap: wrap; margin-top: 12px; }
+.pro-actions .btn { flex: 1 1 160px; }
+.pro-skip { display: block; margin: 10px auto 0; font-size: 14px; color: var(--muted); }
+.pro-thanks { margin: 12px 0 0; padding: 10px 12px; border-radius: 12px; background: var(--green-bg); color: var(--green); font-weight: 700; font-size: 14px; }
+.plans-pro-actions { margin-top: 18px; }
+.plans-link {
+  display: flex; align-items: center; gap: 12px; width: 100%; margin-top: 16px; padding: 14px 16px;
+  border: 1px solid #d9ccff; border-radius: 16px; background: #faf7ff; color: var(--ink); text-align: left; cursor: pointer;
 }
-/* PLANS-TOP-END */
+.plans-link:hover { background: #f4eeff; }
+.plans-link b { display: block; color: var(--violet); }
+.plans-link small { display: block; color: var(--muted); font-size: 13px; }
+/* PRO-CARD-END */

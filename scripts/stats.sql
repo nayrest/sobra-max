@@ -65,7 +65,7 @@ UNION ALL SELECT 'MATCH, по которым связались любым сп�
           (SELECT COUNT(*) FROM real_offers WHERE status = 'accepted')::text
 UNION ALL SELECT 'SOBRA Pro: увидели тариф (людей)', COUNT(*)::text FROM pro_interest
           WHERE event = 'shown' AND user_id NOT BETWEEN 900000000000 AND 910000000999
-UNION ALL SELECT '  нажали «Подключить Pro» / «Продолжить бесплатно»',
+UNION ALL SELECT '  нажали «Оформить подписку» / «Продолжить бесплатно»',
           (COUNT(*) FILTER (WHERE event = 'click'))::text || ' / ' || (COUNT(*) FILTER (WHERE event = 'dismiss'))::text
           FROM pro_interest WHERE user_id NOT BETWEEN 900000000000 AND 910000000999
 UNION ALL SELECT 'Жалоб (всего)', COUNT(*)::text FROM reports WHERE reporter_id NOT BETWEEN 900000000000 AND 910000000999

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#f7f9ff">
   <title>SOBRA AI</title>
-  <link rel="stylesheet" href="style.css?v=2026-10-20-5">
+  <link rel="stylesheet" href="style.css?v=2026-10-20-8">
   <!-- MAX Bridge: даёт window.WebApp.initData для авторизации -->
   <script src="https://st.max.ru/js/max-web-app.js"></script>
 </head>
@@ -287,6 +287,11 @@
         <p class="form-error" id="profile-error" hidden></p>
         <div class="actions"><button class="btn primary" type="submit">Сохранить профиль</button></div>
       </form>
+      <button class="plans-link" type="button" data-pro-go="plans">
+        <span class="pro-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6L3.3 9.3l6.1-.7z"/></svg></span>
+        <span class="grow"><b>Тарифы и SOBRA Pro</b><small>Что входит в бесплатный тариф и в подписку</small></span>
+        <span aria-hidden="true">→</span>
+      </button>
     </section>
 
     <!-- ================= ОБЩЕЕ ================= -->
@@ -325,6 +330,7 @@
 
     <!-- ================= ТАРИФЫ ================= -->
     <section id="view-plans" class="view" hidden>
+      <button class="back" type="button" id="plans-back">← Назад</button>
       <div class="page-head"><h1>Тарифы</h1><p>Выберите, что подходит вам сейчас.</p></div>
       <div class="plans-grid">
         <article class="plan-card">
@@ -350,6 +356,7 @@
           <li>Увеличенный лимит приглашений</li>
           <li>Уведомления о новых подходящих специалистах</li>
           </ul>
+          <div class="plans-pro-actions" id="plans-pro-actions"></div>
         </article>
       </div>
     </section>
@@ -368,8 +375,6 @@
       <span class="tab-icon"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17.5" cy="8.5" r="2.5"/><path d="M16.3 14.1A4.6 4.6 0 0 1 21.6 19"/></svg><b class="tab-badge" id="badge-contacts" hidden></b></span><span>Контакты</span></button>
     <button type="button" data-tab="profile">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span>Профиль</span></button>
-    <button type="button" data-tab="plans">
-      <svg viewBox="0 0 24 24"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.2"/></svg><span>Тарифы</span></button>
     <div class="nav-cycle">
       <p class="nav-title">Как работает SOBRA</p>
       <ol>
@@ -452,6 +457,6 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
-  <script src="app.js?v=2026-10-20-5"></script>
+  <script src="app.js?v=2026-10-20-8"></script>
 </body>
 </html>
