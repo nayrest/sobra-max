@@ -1281,6 +1281,7 @@ components:
         traction: { type: string, maxLength: 3000, nullable: true }
         business_model: { type: string, maxLength: 3000, nullable: true }
         economics: { type: string, maxLength: 3000, nullable: true }
+        legal: { type: string, maxLength: 3000, nullable: true, description: "Учёт, налоги и документы: форма бизнеса, налоговый режим, кто ведёт учёт, договоры" }
 
     StartupInput:
       type: object
@@ -1304,10 +1305,11 @@ components:
         traction: { type: string, maxLength: 1000, nullable: true, description: Как проверяли спрос }
         business_model: { type: string, maxLength: 1000, nullable: true }
         economics: { type: string, maxLength: 1000, nullable: true }
+        legal: { type: string, maxLength: 1000, nullable: true }
 
     AutofillFields:
       type: object
-      required: [name, category, market_type, stage, seeking, customer, problem, solution, competitors, traction, business_model, economics, partner_needed]
+      required: [name, category, market_type, stage, seeking, customer, problem, solution, competitors, traction, business_model, economics, legal, partner_needed]
       properties:
         name: { type: string, maxLength: 100 }
         category: { type: string, enum: ["Ресторан / кафе / кофейня", "Магазин / E-commerce", "Услуги", "Производство", "Образование", "Финансы", "Технологии / IT / SaaS", "AI / ИИ", "Маркетинг / медиа", "Логистика / доставка", "Другое"] }
@@ -1321,6 +1323,7 @@ components:
         traction: { type: string, maxLength: 1000, description: Пусто, если в описании не было }
         business_model: { type: string, maxLength: 1000, description: Пусто, если в описании не было }
         economics: { type: string, maxLength: 1000, description: Пусто, если в описании не было }
+        legal: { type: string, maxLength: 1000, description: Пусто, если в описании не было }
         partner_needed: { type: string, maxLength: 1000 }
         wants_partner: { type: boolean, description: "В описании сказано, что автор ищет партнёра или людей в команду — фронтенд включает галочку «Ищу партнёра»" }
 
@@ -1343,6 +1346,7 @@ components:
         demand: { $ref: "#/components/schemas/MapBlock" }
         model: { $ref: "#/components/schemas/MapBlock" }
         economics: { $ref: "#/components/schemas/MapBlock" }
+        legal: { $ref: "#/components/schemas/MapBlock", description: "Учёт, налоги и документы. В картах, построенных до 23.10.2026, может отсутствовать" }
         _source: { type: string, enum: [ai, rules], description: Построена ИИ или по правилам }
 
     Startup:
@@ -1371,6 +1375,7 @@ components:
         traction: { type: string, nullable: true }
         business_model: { type: string, nullable: true }
         economics: { type: string, nullable: true }
+        legal: { type: string, nullable: true }
         partner_needed: { type: string, nullable: true }
         idea_map: { allOf: [{ $ref: "#/components/schemas/IdeaMap" }], nullable: true }
         founder_verified: { type: boolean, description: Основатель подтвердил телефон через MAX (в поиске, приглашениях и публичной карточке) }
@@ -1395,7 +1400,7 @@ components:
       required: [id, block_id, block_title, title, method, method_source, status]
       properties:
         id: { type: integer }
-        block_id: { type: string, enum: [audience, problem, solution, competitors, demand, model, economics] }
+        block_id: { type: string, enum: [audience, problem, solution, competitors, demand, model, economics, legal] }
         block_title: { type: string, example: Проверка спроса }
         title: { type: string, example: Проверить спрос }
         method:

@@ -72,6 +72,8 @@ ALTER TABLE startups ADD COLUMN IF NOT EXISTS customer TEXT;
 ALTER TABLE startups ADD COLUMN IF NOT EXISTS competitors TEXT;
 ALTER TABLE startups ADD COLUMN IF NOT EXISTS business_model TEXT;
 ALTER TABLE startups ADD COLUMN IF NOT EXISTS economics TEXT;
+-- Учёт, налоги и документы: форма бизнеса, налоговый режим, кто ведёт учёт, договоры и разрешения
+ALTER TABLE startups ADD COLUMN IF NOT EXISTS legal TEXT;
 ALTER TABLE startups ADD COLUMN IF NOT EXISTS partner_needed TEXT;
 
 -- Карта проекта: статус каждого блока и готовность в процентах

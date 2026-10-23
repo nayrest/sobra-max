@@ -186,7 +186,7 @@ checks:
           readiness: { type: integer, minimum: 0, maximum: 100 }
           idea_map:
             type: object
-            required: [audience, problem, solution, competitors, demand, model, economics]
+            required: [audience, problem, solution, competitors, demand, model, economics, legal]
           tasks:
             type: array
             min_items: 1

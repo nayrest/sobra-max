@@ -579,7 +579,7 @@ function createApi({ notify = {} } = {}) {
   // Idea Check: обязательные блоки описывают суть, остальные можно заполнить позже —
   // незаполненные честно попадут в карту проекта как «не проработано».
   const REQUIRED_IDEA = ["customer", "problem", "solution", "partner_needed"];
-  const OPTIONAL_IDEA = ["competitors", "traction", "business_model", "economics"];
+  const OPTIONAL_IDEA = ["competitors", "traction", "business_model", "economics", "legal"];
   const IDEA_FIELD_MAX = 3000;
 
   // Пересчитывает карту и приводит в соответствие Action Plan

@@ -95,7 +95,7 @@ async function getUsername(userId) {
 // Поля Idea Check, которые можно редактировать по отдельности
 const IDEA_FIELDS = [
   "customer", "problem", "solution", "competitors",
-  "traction", "business_model", "economics", "partner_needed", "seeking",
+  "traction", "business_model", "economics", "legal", "partner_needed", "seeking",
 ];
 
 async function saveStartupDraft(founderId, data) {
@@ -103,9 +103,9 @@ async function saveStartupDraft(founderId, data) {
     `INSERT INTO startups (
        founder_id, name, category, market_type, stage, seeking, investment_amount,
        customer, problem, solution, competitors, traction, business_model, economics, partner_needed,
-       links, skills, status
+       links, skills, legal, status
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'draft')
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, 'draft')
      RETURNING *`,
     [
       founderId, data.name, data.category, data.market_type, data.stage, data.seeking,
@@ -114,6 +114,7 @@ async function saveStartupDraft(founderId, data) {
       data.traction || null, data.business_model || null, data.economics || null, data.partner_needed || null,
       JSON.stringify(data.links || []),
       JSON.stringify(data.skills || []),
+      data.legal || null,
     ]
   );
 

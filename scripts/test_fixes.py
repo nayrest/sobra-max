@@ -279,4 +279,25 @@ else:
     check("«ищу сооснователя» → «Команда / co-founder»", f.get("seeking") == "Команда / co-founder", f)
     check("теги из фразы: Python, JavaScript, Backend", set(f.get("skills", [])) >= {"Python", "JavaScript", "Backend"}, f)
 
+print("\n11. Блок «Учёт, налоги и документы»")
+LG = 800000000000 + RUN * 10 + 9
+s, lg = call("POST", "/api/startups", LG, {
+    "name": "Обеды для столовой (тест учёта)", "category": "Ресторан / кафе / кофейня", "market_type": "B2C",
+    "stage": "Идея", "customer": "Студенты", "problem": "Очереди в столовой", "solution": "Предзаказ обеда"})
+m = (lg or {}).get("idea_map") or {}
+check("без ответа блок legal в карте — «не проработано»", s == 201 and m.get("legal", {}).get("status") == "missing", (s, m.get("legal")))
+check("по блоку legal открыта задача в Action Plan",
+      any(t["block_id"] == "legal" and t["status"] == "open" for t in lg.get("tasks", [])), lg.get("tasks"))
+task = next((t for t in lg.get("tasks", []) if t["block_id"] == "legal"), {})
+check("у задачи понятное название и шаги", task.get("title", "").startswith("Решить вопросы учёта") and len(task.get("method", [])) >= 3, task)
+s, up = call("PATCH", f"/api/startups/{lg['id']}", LG, {"legal": "ИП на УСН 6%, договор со столовой, учёт через сервис банка"})
+check("PATCH legal сохраняет ответ и пересчитывает блок",
+      s == 200 and up.get("legal", "").startswith("ИП на УСН") and up["idea_map"]["legal"]["status"] != "missing", (s, up.get("idea_map", {}).get("legal")))
+s, lg2 = call("POST", "/api/startups", LG, {
+    "name": "С ответом про учёт (тест)", "category": "Услуги", "market_type": "B2C", "stage": "Идея",
+    "customer": "Студенты", "problem": "Очереди", "solution": "Предзаказ", "legal": "Самозанятость, чеки через «Мой налог»"})
+check("legal можно передать при создании", s == 201 and lg2.get("legal") == "Самозанятость, чеки через «Мой налог»", (s, lg2))
+s, err = call("PATCH", f"/api/startups/{lg['id']}", LG, {"legal": "x" * 3001})
+check("слишком длинный ответ legal → 400", s == 400, (s, err))
+
 print(f"\nИтого: {ok_count} OK, {fail_count} FAIL")

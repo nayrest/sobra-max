@@ -62,7 +62,21 @@ const BLOCKS = [
   { id: "demand", field: "traction", title: "Проверка спроса", q: "Как проверяли спрос?", hint: "Интервью, опросы, заявки, продажи, пилоты. С цифрами, если есть." },
   { id: "model", field: "business_model", title: "Бизнес-модель", q: "Как будете зарабатывать?", hint: "Кто платит, за что и сколько." },
   { id: "economics", field: "economics", title: "Экономика", q: "Считали ли экономику?", hint: "Средний чек, себестоимость, маржа, срок окупаемости — если уже считали." },
+  { id: "legal", field: "legal", title: "Учёт, налоги и документы", q: "Как будете оформлять бизнес и вести учёт?", hint: "Самозанятость, ИП или ООО, налоговый режим, кто ведёт учёт, какие нужны договоры и разрешения. Если ещё не думали — так и напишите." },
 ];
+
+// Какая компетенция закрывает непроработанный блок карты
+const COMPETENCE = {
+  audience: "исследование аудитории", problem: "интервью с клиентами", solution: "продукт",
+  competitors: "анализ рынка", demand: "маркетинг и продажи", model: "монетизация",
+  economics: "финансы и юнит-экономика", legal: "учёт, налоги и право (бухгалтер, юрист)",
+};
+
+// Формат участия, который ИИ предлагает для кандидата
+const PARTICIPATION = {
+  cofounder: "Сооснователь", partner: "Партнёр на часть времени",
+  specialist: "Внешний специалист", consult: "Разовая консультация",
+};
 
 const PARTNER_QUESTION = {
   field: "partner_needed",
@@ -1100,6 +1114,10 @@ function renderProject(s) {
   const openTasks = tasks.filter((t) => t.status === "open");
   const doneTasks = tasks.filter((t) => t.status === "done");
   const missingTitles = BLOCKS.filter((b) => map[b.id] && map[b.id].status !== "confirmed").map((b) => b.title.toLowerCase());
+  // Сначала то, что совсем не проработано, потом гипотезы
+  const gapRank = (b) => ((map[b.id]?.status || "missing") === "missing" ? 0 : 1);
+  const competences = BLOCKS.filter((b) => (map[b.id]?.status || (s[b.field] ? "hypothesis" : "missing")) !== "confirmed")
+    .sort((a, b) => gapRank(a) - gapRank(b)).map((b) => COMPETENCE[b.id]).filter(Boolean);
 
   $("project-detail").innerHTML = `
     <div class="page-head">
@@ -1156,7 +1174,9 @@ function renderProject(s) {
       <h3>${esc(seekingText(s))}</h3>
       <p>${esc(s.partner_needed || "Не указано")}</p>
       ${projectSkillsBlock(s)}
-      ${missingTitles.length ? `<p class="muted">Проекту пока не хватает: ${esc(missingTitles.slice(0, 3).join(", "))}. Партнёр с опытом в этом ускорит проверку.</p>` : ""}
+      ${competences.length ? `<div class="need-skills"><p class="cand-col-title">Каких компетенций не хватает по карте</p>
+        <p class="muted">${esc(competences.slice(0, 4).join(" · "))}</p>
+        <p class="muted small">ИИ учитывает это при подборе. Не всегда нужен сооснователь: для договора хватит разовой консультации юриста, для учёта — внешнего бухгалтера.</p></div>` : ""}
       ${published
         ? `<button class="btn primary block" type="button" id="go-match">Подобрать партнёра →</button>
            <div class="actions"><button class="btn danger small" type="button" id="delete-project">Удалить проект</button></div>`
@@ -1872,8 +1892,8 @@ function candidateCard(c) {
       </div>
       ${ai ? `<div class="cand-score ${v.cls}"><b>${ai.score}%</b><span>Совпадение</span></div>` : ""}
     </div>
-    ${demoBadge(c.user_id) || verifiedBadge(c.phone_verified)
-      ? `<div class="chips cand-badges">${demoBadge(c.user_id)} ${verifiedBadge(c.phone_verified)}</div>` : ""}
+    ${demoBadge(c.user_id) || verifiedBadge(c.phone_verified) || PARTICIPATION[ai?.format]
+      ? `<div class="chips cand-badges">${PARTICIPATION[ai?.format] ? badge(`Формат: ${PARTICIPATION[ai.format]}`, "violet") : ""} ${demoBadge(c.user_id)} ${verifiedBadge(c.phone_verified)}</div>` : ""}
     ${tags.length ? `<div class="cand-tags">${tags.map((t) => `<span class="cand-tag${hit.has(skillKey(t)) ? " match" : ""}">${esc(skillLabel(t))}</span>`).join("")}</div>` : ""}
     ${recommendation ? `<div class="cand-reco"><p class="cand-reco-title">✦ Рекомендации ИИ</p><p>${esc(recommendation)}</p></div>` : ""}
     ${strengths.length || ask.length ? `<div class="cand-cols">

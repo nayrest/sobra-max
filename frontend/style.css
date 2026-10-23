@@ -971,3 +971,8 @@ body.premium-open .content { padding-bottom: calc(var(--sheet-h, 360px) + var(--
   .nav-cycle ol { margin: 0; padding: 0 14px 14px 36px; }
 }
 /* NAV-CYCLE-END */
+
+/* Карта проекта: каких компетенций не хватает (для AI Match) */
+.need-skills { margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: rgba(99, 102, 241, 0.06); border: 1px solid rgba(99, 102, 241, 0.18); }
+.need-skills .muted { margin: 4px 0 0; }
+.need-skills .small { font-size: 13px; }

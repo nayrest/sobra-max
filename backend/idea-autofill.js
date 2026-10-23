@@ -16,7 +16,8 @@ const SYSTEM_PROMPT = `Ты помогаешь начинающему предп
 - Пиши по-русски, простыми словами, от лица основателя, 1–2 предложения в поле.
 - Не придумывай факты: цифры, результаты опросов, продажи, названия конкурентов — только если они есть в описании.
 - customer, problem, solution, partner_needed: сформулируй по описанию. Если данных мало — короткое предположение, без выдуманных цифр.
-- competitors, traction, business_model, economics: заполни, только если об этом прямо сказано в описании. Иначе пустая строка "".
+- competitors, traction, business_model, economics, legal: заполни, только если об этом прямо сказано в описании. Иначе пустая строка "".
+- legal — учёт, налоги и документы: форма бизнеса (самозанятость, ИП, ООО), налоговый режим, кто ведёт учёт, договоры, разрешения.
 - category — строго одно значение из списка: {CATEGORIES}.
 - market_type — строго "B2B", "B2C" или "B2B2C".
 - stage — строго одно из: {STAGES}. Если стадия не названа — "Идея".
@@ -26,9 +27,9 @@ const SYSTEM_PROMPT = `Ты помогаешь начинающему предп
 - Если wants_partner = true, partner_needed обязательно заполни: кого ищут и для чего — словами автора (роль, навыки, задачи). Не оставляй его пустым.
 
 Ответь строго JSON-объектом без пояснений вокруг:
-{"name": "", "category": "", "market_type": "", "stage": "", "seeking": "", "customer": "", "problem": "", "solution": "", "competitors": "", "traction": "", "business_model": "", "economics": "", "wants_partner": false, "partner_needed": ""}`;
+{"name": "", "category": "", "market_type": "", "stage": "", "seeking": "", "customer": "", "problem": "", "solution": "", "competitors": "", "traction": "", "business_model": "", "economics": "", "legal": "", "wants_partner": false, "partner_needed": ""}`;
 
-const TEXT_FIELDS = ["customer", "problem", "solution", "competitors", "traction", "business_model", "economics", "partner_needed"];
+const TEXT_FIELDS = ["customer", "problem", "solution", "competitors", "traction", "business_model", "economics", "legal", "partner_needed"];
 const FIELD_MAX = 1000;
 
 function cleanText(value, max = FIELD_MAX) {
