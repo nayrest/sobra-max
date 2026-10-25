@@ -65,6 +65,19 @@ const BLOCKS = [
   { id: "legal", field: "legal", title: "Учёт, налоги и документы", q: "Как будете оформлять бизнес и вести учёт?", hint: "Самозанятость, ИП или ООО, налоговый режим, кто ведёт учёт, какие нужны договоры и разрешения. Если ещё не думали — так и напишите." },
 ];
 
+
+// Иконки блоков карты (24×24, контуры наследуют цвет статуса)
+const BLOCK_ICONS = {
+  audience: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="8" r="3.2"/><path d="M2.8 19.5c0-3.2 2.8-5.4 6.2-5.4s6.2 2.2 6.2 5.4z"/><circle cx="17" cy="9" r="2.5"/><path d="M16.4 14.3c2.9-.3 4.8 1.5 4.8 4.2h-4.3c0-1.7-.2-3.2-.5-4.2z"/></svg>',
+  problem: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><circle cx="9" cy="10" r=".6" fill="currentColor"/><circle cx="15" cy="10" r=".6" fill="currentColor"/><path d="M8.6 16c1-1.3 2.2-1.9 3.4-1.9s2.4.6 3.4 1.9"/></svg>',
+  solution: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 18h5M10.5 21h3"/><path d="M12 3.2a6 6 0 0 0-3.6 10.8c.6.5 1 1.1 1 1.9V16h5.2v-.1c0-.8.4-1.4 1-1.9A6 6 0 0 0 12 3.2z"/></svg>',
+  competitors: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 9.5 5 4.5h14l1.5 5"/><path d="M3.5 9.5a2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 2 0"/><path d="M5 12v7.5h14V12M10 19.5v-4.5h4v4.5"/></svg>',
+  demand: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="3.5" y="12" width="4.2" height="8" rx="1.1"/><rect x="9.9" y="7" width="4.2" height="13" rx="1.1"/><rect x="16.3" y="3.5" width="4.2" height="16.5" rx="1.1"/></svg>',
+  model: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 3.5h6l-1.4 2.6h-3.2z"/><path d="M12 7c-4.2 2.6-6.5 5.4-6.5 8.7 0 2.6 2.2 4.3 6.5 4.3s6.5-1.700 6.500-4.300C18.500 12.400 16.200 9.600 12 7zm-.8 4.300h1.600v.7c.9.100 1.500.5 1.700 1.200h-1.400c-.1-.3-.4-.4-.9-.4-.6 0-.9.200-.9.5 0 .3.300.4 1.100.6 1.300.3 2.100.7 2.100 1.700 0 .8-.6 1.400-1.600 1.600v.7h-1.600v-.7c-1-.2-1.700-.7-1.800-1.500h1.500c.1.300.4.500 1 .5s.9-.2.900-.5-.3-.4-1.200-.6c-1.100-.3-2-.7-2-1.700 0-.8.600-1.400 1.600-1.600z" fill-rule="evenodd"/></svg>',
+  economics: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><ellipse cx="9" cy="7" rx="5.5" ry="2.5"/><path d="M3.5 7v4c0 1.400 2.500 2.500 5.500 2.500s5.500-1.100 5.500-2.500V7"/><path d="M3.5 11v4c0 1.400 2.500 2.500 5.500 2.500"/><ellipse cx="16" cy="15" rx="5" ry="2.300"/><path d="M11 15v4c0 1.300 2.200 2.300 5 2.300s5-1 5-2.300v-4"/></svg>',
+  legal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6.500 3h7.500l4.500 4.500V20a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v4.500h4.500M8.500 12.500h7M8.500 16h7"/></svg>',
+};
+
 // Какая компетенция закрывает непроработанный блок карты
 const COMPETENCE = {
   audience: "исследование аудитории", problem: "интервью с клиентами", solution: "продукт",
@@ -1714,7 +1727,7 @@ function mapCard(block, startup, item) {
   const status = STATUS[item?.status] || STATUS.missing;
   const answer = startup[block.field];
   return `<article class="card map-card ${item?.status || "missing"}" id="block-${block.id}">
-    <div class="map-head"><h3><span class="map-icon">${status.icon}</span> ${esc(block.title)}</h3>${badge(status.text, status.tone)}</div>
+    <div class="map-head"><div class="map-title"><span class="map-ico" aria-hidden="true">${BLOCK_ICONS[block.id] || ""}</span><h3>${esc(block.title)}</h3></div>${badge(status.text, status.tone)}</div>
     <p class="answer">${answer ? esc(answer) : '<span class="muted">Нет ответа</span>'}</p>
     <button class="text-btn" type="button" data-edit="${block.id}">Обновить блок →</button>
   </article>`;

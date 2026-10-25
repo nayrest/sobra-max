@@ -394,14 +394,18 @@ h2.section { margin: 22px 0 10px; }
 
 /* ---------- Карта: иконки статуса ---------- */
 
-.map-icon {
-  display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
-  font-size: 13px; margin-right: 4px; vertical-align: 1px;
+.map-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.map-title h3 { margin: 0; min-width: 0; }
+.map-ico {
+  flex: 0 0 44px; width: 44px; height: 44px; border-radius: 13px; display: grid; place-items: center;
   background: var(--red-bg); color: var(--red);
 }
-.map-card.confirmed .map-icon { background: var(--green-bg); color: var(--green); }
-.map-card.hypothesis .map-icon { background: var(--amber-bg); color: var(--amber); }
+.map-ico svg { width: 26px; height: 26px; }
+.map-head > .badge, .map-head > .pill { flex: none; white-space: nowrap; }
+.map-card.confirmed .map-ico { background: var(--green-bg); color: var(--green); }
+.map-card.hypothesis .map-ico { background: var(--amber-bg); color: var(--amber); }
 .map-card.confirmed { border-color: #cdebd9; }
+.map-card.missing { border-color: #f6d4da; }
 .map-card .answer { white-space: pre-line; }
 
 /* ---------- Action Plan ---------- */
